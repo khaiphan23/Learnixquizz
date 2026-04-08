@@ -4,10 +4,11 @@ import { useQuizStore } from '../store/QuizContext';
 import { useAuth } from '../store/AuthContext';
 import { useLang } from '../store/LangContext';
 import { Button, Input, Select, Textarea, Card } from '../components/ui';
-import { generateQuizAI } from '../services/geminiService';
+import { generateQuizAI, generateQuestionsFromContent } from '../services/geminiService';
+import { extractTextFromFile } from '../services/fileParser';
 import { Question, Quiz } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { PlusCircle, Sparkles, Trash2, ChevronDown, ChevronUp, Image } from 'lucide-react';
+import { PlusCircle, Sparkles, Trash2, ChevronDown, ChevronUp, Image, Upload, FileText, Clipboard } from 'lucide-react';
 
 const emptyQuestion = (): Question => ({
   id: uuidv4(), type: 'multiple-choice', text: '', options: ['', '', '', ''], correctAnswerIndex: 0, explanation: '',
@@ -38,6 +39,18 @@ export const CreateQuiz: React.FC = () => {
   const [aiError, setAiError] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
+  // Content generation states
+  const [contentSource, setContentSource] = useState<'paste' | 'upload'>('paste');
+  const [pastedText, setPastedText] = useState('');
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [extractedText, setExtractedText] = useState('');
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [genError, setGenError] = useState('');
+  const [showPreview, setShowPreview] = useState(false);
+  const [mcCount, setMcCount] = useState(3);
+  const [tfCount, setTfCount] = useState(2);
+  const [essayCount, setEssayCount] = useState(1);
+
   if (!user) { navigate('/login'); return null; }
 
   const updateQuestion = (idx: number, updates: Partial<Question>) => {
@@ -57,6 +70,72 @@ export const CreateQuiz: React.FC = () => {
       setShowAI(false);
     } catch (e: any) { setAiError(e.message); }
     setAiGenerating(false);
+  };
+
+  // Handle file selection
+  // Reset file-related state when switching to paste mode
+  const handleSourceChange = (source: 'paste' | 'upload') => {
+    setContentSource(source);
+    if (source === 'paste') {
+      setUploadedFile(null);
+      setExtractedText('');
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (file) {
+      setUploadedFile(file);
+      setExtractedText('');
+      setGenError('');
+    }
+  };
+
+  // Extract text from uploaded file
+  const extractText = async () => {
+    if (!uploadedFile) return;
+    setIsExtracting(true);
+    setGenError('');
+    try {
+      const text = await extractTextFromFile(uploadedFile);
+      setExtractedText(text);
+      setShowPreview(true);
+    } catch (err: any) {
+      setGenError(err.message);
+      setExtractedText('');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  // Generate questions from content
+  const generateFromContent = async () => {
+    const content = contentSource === 'paste' ? pastedText : extractedText;
+    setGenError('');
+    if (!content.trim()) {
+      setGenError(lang === 'vi' ? 'Vui lòng nhập nội dung hoặc trích xuất từ file' : 'Please enter or extract content first');
+      return;
+    }
+    if (mcCount === 0 && tfCount === 0 && essayCount === 0) {
+      setGenError(lang === 'vi' ? 'Vui lòng chọn ít nhất 1 loại câu hỏi' : 'Please select at least one question type');
+      return;
+    }
+
+    setAiGenerating(true);
+    try {
+      const generated = await generateQuestionsFromContent(
+        content,
+        { multipleChoice: mcCount, trueFalse: tfCount, essay: essayCount },
+        lang
+      );
+      setQuestions(prev => [...prev.filter(q => q.text.trim()), ...generated.map(q => ({ ...q, id: uuidv4() }))]);
+      // Optional: fill quiz details from content
+      if (!topic) setTopic(content.substring(0, 50) + (content.length > 50 ? '...' : ''));
+    } catch (e: any) {
+      setGenError(e.message);
+    } finally {
+      setAiGenerating(false);
+    }
   };
 
   const handleSave = async () => {
@@ -150,6 +229,180 @@ export const CreateQuiz: React.FC = () => {
             </Button>
           </div>
         )}
+      </Card>
+
+      {/* Generate from Content Section */}
+      <Card className="p-6 space-y-4 border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-900/10">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 font-semibold">
+            <FileText className="h-5 w-5" />{t.generateFromContent}
+          </div>
+        </div>
+
+        {/* Source tabs */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleSourceChange('paste')}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl border transition-all ${
+              contentSource === 'paste'
+                ? 'bg-emerald-600 text-white border-emerald-600'
+                : 'bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300'
+            }`}
+          >
+            <Clipboard className="h-4 w-4" />{t.pasteContent}
+          </button>
+          <button
+            onClick={() => handleSourceChange('upload')}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl border transition-all ${
+              contentSource === 'upload'
+                ? 'bg-emerald-600 text-white border-emerald-600'
+                : 'bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300'
+            }`}
+          >
+            <Upload className="h-4 w-4" />{t.uploadFile}
+          </button>
+        </div>
+
+        {/* Paste text mode */}
+        {contentSource === 'paste' && (
+          <div className="space-y-2">
+            <Textarea
+              value={pastedText}
+              onChange={e => setPastedText(e.target.value)}
+              placeholder={lang === 'vi' ? 'Dán nội dung bài học, bài viết hoặc văn bản vào đây...' : 'Paste your lesson content, article, or text here...'}
+              rows={6}
+            />
+            {pastedText && (
+              <button
+                onClick={() => setShowPreview(!showPreview)}
+                className="text-sm text-emerald-600 dark:text-emerald-400 hover:underline"
+              >
+                {showPreview ? 'Ẩn' : 'Xem'} {t.previewExtracted}
+              </button>
+            )}
+            {showPreview && pastedText && (
+              <div className="max-h-48 overflow-auto bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                {pastedText}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Upload file mode */}
+        {contentSource === 'upload' && (
+          <div className="space-y-3">
+            {/* Dropzone */}
+            <div
+              onDrop={(e) => {
+                e.preventDefault();
+                const file = e.dataTransfer.files[0];
+                if (file) setUploadedFile(file);
+              }}
+              onDragOver={(e) => e.preventDefault()}
+              className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-6 text-center hover:border-emerald-500 dark:hover:border-emerald-500 transition-colors cursor-pointer"
+            >
+              <input
+                type="file"
+                accept=".txt,.pdf,.docx"
+                onChange={handleFileChange}
+                className="hidden"
+                id="file-upload"
+              />
+              <label htmlFor="file-upload" className="cursor-pointer">
+                <Upload className="h-8 w-8 mx-auto text-slate-400 mb-2" />
+                <p className="text-sm text-slate-600 dark:text-slate-400">{t.dropzonePrompt}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">{t.supportedFormats}</p>
+              </label>
+            </div>
+
+            {uploadedFile && (
+              <div className="flex items-center justify-between bg-white dark:bg-slate-700 rounded-lg px-4 py-2 border border-slate-200 dark:border-slate-600">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-emerald-600" />
+                  <span className="text-sm text-slate-700 dark:text-slate-300 truncate max-w-xs">{uploadedFile.name}</span>
+                  <span className="text-xs text-slate-500">({(uploadedFile.size / 1024).toFixed(1)} KB)</span>
+                </div>
+                <button
+                  onClick={extractText}
+                  disabled={isExtracting}
+                  className="px-3 py-1 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isExtracting ? t.extracting : t.extractText}
+                </button>
+              </div>
+            )}
+
+            {extractedText && (
+              <>
+                <button
+                  onClick={() => setShowPreview(!showPreview)}
+                  className="text-sm text-emerald-600 dark:text-emerald-400 hover:underline"
+                >
+                  {showPreview ? 'Ẩn' : 'Xem'} {t.previewExtracted}
+                </button>
+                {showPreview && (
+                  <div className="max-h-48 overflow-auto bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                    {extractedText}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Question type counts */}
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.multipleChoice}</label>
+            <input
+              type="number"
+              min="0"
+              max="20"
+              value={mcCount}
+              onChange={e => setMcCount(Number(e.target.value))}
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.trueFalse}</label>
+            <input
+              type="number"
+              min="0"
+              max="20"
+              value={tfCount}
+              onChange={e => setTfCount(Number(e.target.value))}
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.essay}</label>
+            <input
+              type="number"
+              min="0"
+              max="10"
+              value={essayCount}
+              onChange={e => setEssayCount(Number(e.target.value))}
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+            />
+          </div>
+        </div>
+
+        {/* Error message */}
+        {genError && (
+          <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">
+            {genError}
+          </div>
+        )}
+
+        {/* Generate button */}
+        <Button
+          onClick={generateFromContent}
+          isLoading={aiGenerating}
+          className="w-full bg-emerald-600 hover:bg-emerald-700"
+        >
+          <Sparkles className="h-4 w-4" />
+          {t.generateFromContentBtn}
+        </Button>
       </Card>
 
       <div className="space-y-4">
