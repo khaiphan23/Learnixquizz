@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(sed -i '221,222d' \"src/pages/Auth.tsx\")",
+      "Bash(sed -i 's/    setDebugUrl\\(redirectUrl\\);/    \\\\/\\\\/ setDebugUrl\\(redirectUrl\\); --- REMOVED FOR LINT/' \"src/pages/Auth.tsx\")",
+      "Bash(dir /a .git)",
+      "Bash(git remote:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
