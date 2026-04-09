@@ -22,9 +22,9 @@ export async function parsePdf(file: File): Promise<string> {
   validateFile(file);
   const pdfjsLib = await import('pdfjs-dist');
 
-  // Sử dụng phiên bản động từ thư viện để đảm bảo API và Worker luôn khớp nhau
+  // Sử dụng .js thay vì .mjs để tránh lỗi "dynamically imported module" trên một số trình duyệt/CSP
   const version = pdfjsLib.version;
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${version}/pdf.worker.min.mjs`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${version}/pdf.worker.min.js`;
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({

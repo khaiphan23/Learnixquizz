@@ -15,11 +15,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return response.status(500).json({ error: 'Server configuration error' });
     }
 
-    // Thử nhiều model để tăng độ tin cậy
+    // Thử nhiều model theo đề xuất của người dùng để tăng độ tin cậy
     const MODELS = [
       'gemini-1.5-flash',
+      'gemini-1.5-flash-8b',
       'gemini-1.5-pro',
-      'gemini-2.0-flash-exp',
     ];
 
     let lastError = '';
