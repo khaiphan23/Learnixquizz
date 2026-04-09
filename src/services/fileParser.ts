@@ -22,15 +22,14 @@ export async function parsePdf(file: File): Promise<string> {
   validateFile(file);
   const pdfjsLib = await import('pdfjs-dist');
 
-  // Cách thiết lập worker an toàn nhất cho Vercel/Production:
-  // Sử dụng phiên bản cố định từ CDN để tránh lỗi version mismatch và lỗi Blob URL
-  const PDFJS_VERSION = '4.4.168';
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.mjs`;
+  // Sử dụng phiên bản động từ thư viện để đảm bảo API và Worker luôn khớp nhau
+  const version = pdfjsLib.version;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${version}/pdf.worker.min.mjs`;
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({
     data: arrayBuffer,
-    useWorkerFetch: false, // Tắt fetch worker để tránh lỗi CSP/Blob trên một số trình duyệt
+    useWorkerFetch: false,
     isEvalSupported: false
   }).promise;
 
