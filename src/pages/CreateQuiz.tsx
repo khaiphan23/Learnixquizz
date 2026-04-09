@@ -113,7 +113,7 @@ export const CreateQuiz: React.FC = () => {
     const content = contentSource === 'paste' ? pastedText : extractedText;
     setGenError('');
     if (!content.trim()) {
-      setGenError(lang === 'vi' ? 'Vui lòng nhập nội dung hoặc trích xuất từ file' : 'Please enter or extract content first');
+      setGenError(lang === 'vi' ? `Vui lòng nhập nội dung hoặc trích xuất từ file` : `Please enter or extract content first`);
       return;
     }
     if (mcCount === 0 && tfCount === 0 && essayCount === 0) {

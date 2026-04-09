@@ -1,31 +1,25 @@
-import { NextRequest, NextResponse } from 'next/server';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-export async function POST(request: NextRequest) {
+export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {
-    const { prompt } = await request.json();
+    const { prompt } = request.body;
 
     if (!prompt) {
-      return NextResponse.json(
-        { error: 'Prompt là bắt buộc' },
-        { status: 400 }
-      );
+      return response.status(400).json({ error: 'Prompt là bắt buộc' });
     }
 
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
     if (!GEMINI_API_KEY) {
       console.error('[Gemini API] Thiếu GEMINI_API_KEY');
-      return NextResponse.json(
-        { error: 'Server configuration error' },
-        { status: 500 }
-      );
+      return response.status(500).json({ error: 'Server configuration error' });
     }
 
     // Thử nhiều model để tăng độ tin cậy
     const MODELS = [
-      'gemini-3.1-flash-lite-preview',
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro',
+      'gemini-2.0-flash-exp',
     ];
 
     let lastError = '';
@@ -37,7 +31,7 @@ export async function POST(request: NextRequest) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-        const response = await fetch(url, {
+        const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -52,28 +46,18 @@ export async function POST(request: NextRequest) {
 
         clearTimeout(timeoutId);
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`[Gemini API] Model ${model} error:`, response.status, errorText);
-          lastError = `${model}: ${response.status}`;
-
-          if (response.status === 429) {
-            // Rate limit - thử model khác
-            continue;
-          }
-          if (response.status === 404) {
-            // Model không tồn tại - thử model khác
-            continue;
-          }
-          // Lỗi khác - thử model khác
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error(`[Gemini API] Model ${model} error:`, res.status, errorText);
+          lastError = `${model}: ${res.status}`;
           continue;
         }
 
-        const data = await response.json();
+        const data = await res.json();
         const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
         if (text) {
-          return NextResponse.json({ text });
+          return response.status(200).json({ text });
         }
 
         lastError = `${model}: response không hợp lệ`;
@@ -87,17 +71,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Nếu tất cả models đều fail
-    return NextResponse.json(
-      { error: `Không thể kết nối Gemini API: ${lastError}` },
-      { status: 500 }
-    );
+    return response.status(500).json({ error: `Không thể kết nối Gemini API: ${lastError}` });
 
   } catch (error: any) {
     console.error('[Gemini API] Unexpected error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return response.status(500).json({ error: 'Internal server error' });
   }
 }
