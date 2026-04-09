@@ -101,8 +101,11 @@ export const TakeQuiz: React.FC = () => {
       };
       await addAttempt(attempt);
       navigate(`/result/${quiz.id}`, { state: { attemptId } });
-    } catch (e) { console.error(e); }
-    setSubmitting(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (

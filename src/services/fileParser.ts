@@ -22,15 +22,16 @@ export async function parsePdf(file: File): Promise<string> {
   validateFile(file);
   const pdfjsLib = await import('pdfjs-dist');
 
-  // Sử dụng .js thay vì .mjs để tránh lỗi "dynamically imported module" trên một số trình duyệt/CSP
-  const version = pdfjsLib.version;
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${version}/pdf.worker.min.js`;
+  // CẤU HÌNH TUYỆT ĐỐI AN TOÀN CHO VERCEL:
+  // Tắt worker hoàn toàn để tránh lỗi "Failed to fetch dynamically imported module"
+  // Điều này khiến PDF được parse trên luồng chính, tránh mọi vấn đề CSP/Blob
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({
     data: arrayBuffer,
     useWorkerFetch: false,
-    isEvalSupported: false
+    isEvalSupported: false,
   }).promise;
 
   const textParts: string[] = [];

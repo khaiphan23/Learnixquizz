@@ -163,8 +163,6 @@ export const CreateQuiz: React.FC = () => {
         shortCode,
       };
 
-      // FIX: dùng addQuiz/editQuiz từ context — có optimistic update
-      // quiz xuất hiện ngay ở MyQuizzes khi navigate, không cần reload
       if (existing) {
         await editQuiz(quiz);
       } else {
@@ -174,6 +172,7 @@ export const CreateQuiz: React.FC = () => {
       navigate('/my-quizzes');
     } catch (e: any) {
       setError(`Lỗi: ${e.message}`);
+    } finally {
       setSaving(false);
     }
   };
