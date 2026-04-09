@@ -15,11 +15,12 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return response.status(500).json({ error: 'Server configuration error' });
     }
 
-    // Cập nhật các model thế hệ 2.0 mới nhất (tháng 4/2026)
+    // Danh sách model từ ổn định đến tiên tiến nhất để đảm bảo tính sẵn sàng cao
     const MODELS = [
       'gemini-2.0-flash',
-      'gemini-2.0-flash-lite-preview',
-      'gemini-2.0-pro-exp',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro',
+      'gemini-2.0-flash-exp',
     ];
 
     let lastError = '';
