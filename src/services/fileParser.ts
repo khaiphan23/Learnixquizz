@@ -1,3 +1,6 @@
+// src/services/fileParser.ts
+// FIX BUG 3: PDF.js worker — dùng Vite asset URL thay vì fetch CDN blob
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 function validateFile(file: File): void {
@@ -19,66 +22,42 @@ export async function parseTxt(file: File): Promise<string> {
 export async function parsePdf(file: File): Promise<string> {
   validateFile(file);
 
-  // FIX: Khởi tạo worker đúng cách cho pdfjs-dist v5.x
-  // Thay vì fetch blob từ CDN (dễ bị CORS/CSP block), dùng cdnjs trực tiếp
-  // hoặc dùng import.meta.url pattern cho Vite
+  // FIX: Import pdfjs và worker đúng chuẩn Vite
+  // Vite sẽ bundle pdf.worker.min.mjs vào /assets/ khi build
+  // Không cần fetch CDN → không bị CORS/CSP → chạy được cả local + Vercel
   const pdfjsLib = await import('pdfjs-dist');
 
-  // Cách 1: Dùng worker từ CDN cdnjs (được phép trong Vercel)
-  // Phải set TRƯỚC khi gọi getDocument()
-  const workerVersion = pdfjsLib.version;
-  const workerSrcCDN = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${workerVersion}/pdf.worker.min.mjs`;
+  // ?url → Vite trả về URL tuyệt đối của file worker đã được copy vào /assets/
+  const { default: workerUrl } = await import(
+    'pdfjs-dist/build/pdf.worker.min.mjs?url'
+  );
 
-  try {
-    // Thử set worker qua URL trực tiếp (không cần fetch blob)
-    // pdfjs-dist v4+ hỗ trợ URL string trực tiếp
-    pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrcCDN;
-  } catch {
-    // Fallback: dùng fake worker (chạy chậm hơn nhưng không cần worker thread)
-    pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-  }
+  // Bắt buộc set TRƯỚC khi gọi getDocument()
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+
+  const arrayBuffer = await file.arrayBuffer();
 
   let pdf;
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    pdf = await pdfjsLib.getDocument({
-      data: arrayBuffer,
-      // Tắt worker nếu set workerSrc thất bại — chạy trong main thread
-      useWorkerFetch: false,
-      isEvalSupported: false,
-    }).promise;
+    pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   } catch (err: any) {
-    // Nếu worker lỗi, thử lại với disableWorker
-    console.warn('[parsePdf] Worker init failed, retrying without worker:', err.message);
-    try {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-      const arrayBuffer = await file.arrayBuffer();
-      pdf = await pdfjsLib.getDocument({
-        data: arrayBuffer,
-        useWorkerFetch: false,
-        isEvalSupported: false,
-      }).promise;
-    } catch (err2: any) {
-      throw new Error(`Không thể đọc PDF: ${err2.message}`);
-    }
+    throw new Error(`Không thể parse PDF: ${err.message}`);
   }
 
   const textParts: string[] = [];
-
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
     const pageText = textContent.items
-      .map((item) => ('str' in item ? item.str : ''))
+      .map((item: any) => ('str' in item ? item.str : ''))
       .join(' ');
     textParts.push(pageText);
   }
 
   const result = textParts.join('\n\n').trim();
-
   if (!result) {
     throw new Error(
-      'PDF này không chứa text có thể trích xuất (có thể là PDF scan/ảnh). ' +
+      'PDF này không chứa text (có thể là file scan/ảnh). ' +
       'Vui lòng dán text thủ công hoặc dùng file .txt/.docx.'
     );
   }
@@ -96,15 +75,11 @@ export async function parseDocx(file: File): Promise<string> {
 
 export async function extractTextFromFile(file: File): Promise<string> {
   const ext = file.name.split('.').pop()?.toLowerCase();
-
   switch (ext) {
-    case 'txt':
-      return parseTxt(file);
-    case 'pdf':
-      return parsePdf(file);
+    case 'txt':  return parseTxt(file);
+    case 'pdf':  return parsePdf(file);
     case 'docx':
-    case 'doc':
-      return parseDocx(file);
+    case 'doc':  return parseDocx(file);
     default:
       throw new Error(`Định dạng không được hỗ trợ: .${ext}. Hỗ trợ: .txt, .pdf, .docx`);
   }
