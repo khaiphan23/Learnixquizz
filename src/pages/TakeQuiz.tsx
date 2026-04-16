@@ -77,7 +77,10 @@ export const TakeQuiz: React.FC = () => {
   const progress = ((currentQ) / quiz.questions.length) * 100;
 
   const handleSubmit = async () => {
+    // Tránh submit 2 lần
+    if (submitting) return;
     setSubmitting(true);
+
     try {
       const hasEssay = quiz.questions.some(q => q.type === 'essay');
       let score = 0;
@@ -100,10 +103,14 @@ export const TakeQuiz: React.FC = () => {
         status: (hasEssay ? 'pending-grading' : 'completed') as 'completed' | 'pending-grading',
       };
       await addAttempt(attempt);
+
+      // FIX: dùng return để thoát hàm ngay sau navigate
+      // Không để setSubmitting(false) chạy sau navigate vì component sắp unmount
       navigate(`/result/${quiz.id}`, { state: { attemptId } });
+      return;
     } catch (e) {
       console.error(e);
-    } finally {
+      // Chỉ reset state khi có lỗi (navigate không được gọi)
       setSubmitting(false);
     }
   };
@@ -148,7 +155,7 @@ export const TakeQuiz: React.FC = () => {
       <div className="flex justify-between">
         <Button variant="outline" onClick={() => setCurrentQ(prev => prev - 1)} disabled={currentQ === 0}>← {t.lang === 'vi' ? 'Trước' : 'Prev'}</Button>
         {isLast ? (
-          <Button isLoading={submitting} onClick={handleSubmit} disabled={answers[q.id] === undefined}>
+          <Button isLoading={submitting} onClick={handleSubmit} disabled={answers[q.id] === undefined || submitting}>
             {t.submit} ✓
           </Button>
         ) : (
