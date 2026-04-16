@@ -74,11 +74,15 @@ export const TakeQuiz: React.FC = () => {
 
   const q = quiz.questions[currentQ];
   const isLast = currentQ === quiz.questions.length - 1;
-  const progress = ((currentQ) / quiz.questions.length) * 100;
+  const progress = (currentQ / quiz.questions.length) * 100;
 
+  // =====================================================
+  // FIX BUG 1: handleSubmit — dùng finally
+  // Trước: setSubmitting(false) có thể không reach được sau navigate()
+  // Sau:   finally luôn chạy → nút không bị stuck loading khi lỗi
+  // =====================================================
   const handleSubmit = async () => {
-    // Tránh submit 2 lần
-    if (submitting) return;
+    if (submitting) return; // chống double-submit
     setSubmitting(true);
 
     try {
@@ -103,21 +107,19 @@ export const TakeQuiz: React.FC = () => {
         status: (hasEssay ? 'pending-grading' : 'completed') as 'completed' | 'pending-grading',
       };
       await addAttempt(attempt);
-
-      // FIX: dùng return để thoát hàm ngay sau navigate
-      // Không để setSubmitting(false) chạy sau navigate vì component sắp unmount
       navigate(`/result/${quiz.id}`, { state: { attemptId } });
-      return;
+      return; // thoát try — finally vẫn chạy nhưng component sắp unmount
     } catch (e) {
-      console.error(e);
-      // Chỉ reset state khi có lỗi (navigate không được gọi)
+      console.error('[handleSubmit] error:', e);
+    } finally {
+      // Luôn reset — nếu navigate thành công: React bỏ qua (unmounted)
+      // Nếu lỗi: nút trở về bình thường để user thử lại
       setSubmitting(false);
     }
   };
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
-      {/* Progress */}
       <div className="space-y-2">
         <div className="flex justify-between text-sm text-slate-500 dark:text-slate-400">
           <span>{t.question} {currentQ + 1}/{quiz.questions.length}</span>
@@ -128,13 +130,11 @@ export const TakeQuiz: React.FC = () => {
         </div>
       </div>
 
-      {/* Question */}
       <Card className="p-6 space-y-6">
         <div className="space-y-3">
           <p className="text-lg font-semibold text-slate-900 dark:text-white">{q.text}</p>
           {q.imageUrl && <img src={q.imageUrl} alt="" className="max-h-48 rounded-xl object-cover border border-slate-200 dark:border-slate-700" />}
         </div>
-
         {q.type === 'essay' ? (
           <textarea value={(answers[q.id] as string) ?? ''} onChange={e => setAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
             placeholder={t.yourAnswer} rows={5}
@@ -151,9 +151,10 @@ export const TakeQuiz: React.FC = () => {
         )}
       </Card>
 
-      {/* Navigation */}
       <div className="flex justify-between">
-        <Button variant="outline" onClick={() => setCurrentQ(prev => prev - 1)} disabled={currentQ === 0}>← {t.lang === 'vi' ? 'Trước' : 'Prev'}</Button>
+        <Button variant="outline" onClick={() => setCurrentQ(prev => prev - 1)} disabled={currentQ === 0}>
+          ← {t.lang === 'vi' ? 'Trước' : 'Prev'}
+        </Button>
         {isLast ? (
           <Button isLoading={submitting} onClick={handleSubmit} disabled={answers[q.id] === undefined || submitting}>
             {t.submit} ✓
@@ -165,7 +166,6 @@ export const TakeQuiz: React.FC = () => {
         )}
       </div>
 
-      {/* Question dots */}
       <div className="flex flex-wrap gap-1.5 justify-center">
         {quiz.questions.map((_, i) => (
           <button key={i} onClick={() => setCurrentQ(i)}
