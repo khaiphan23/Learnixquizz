@@ -59,15 +59,19 @@ export const CreateQuiz: React.FC = () => {
 
   const generateAI = async () => {
     if (!aiTopic.trim()) return;
-    setAiGenerating(true); setAiError('');
+    setAiGenerating(true);
+    setAiError('');
     try {
       const generated = await generateQuizAI(aiTopic, aiNum, difficulty, lang);
       setQuestions(prev => [...prev.filter(q => q.text.trim()), ...generated.map(q => ({ ...q, id: uuidv4() }))]);
       if (!title) setTitle(aiTopic);
       if (!topic) setTopic(aiTopic);
       setShowAI(false);
-    } catch (e: any) { setAiError(e.message); }
-    setAiGenerating(false);
+    } catch (e: any) {
+      setAiError(e.message);
+    } finally {
+      setAiGenerating(false);
+    }
   };
 
   const handleSourceChange = (source: 'paste' | 'upload') => {
@@ -123,11 +127,6 @@ export const CreateQuiz: React.FC = () => {
     }
   };
 
-  // =====================================================
-  // FIX BUG 1: handleSave — dùng finally thay vì chỉ catch
-  // Trước: setSaving(false) chỉ trong catch → thành công mãi loading
-  // Sau:   finally luôn chạy → reset state dù thành công hay lỗi
-  // =====================================================
   const handleSave = async () => {
     if (saving) return; // chống double-submit
     if (!title.trim()) { setError(lang === 'vi' ? 'Vui lòng nhập tiêu đề' : 'Please enter a title'); return; }
@@ -161,12 +160,9 @@ export const CreateQuiz: React.FC = () => {
       }
 
       navigate('/my-quizzes');
-      return; // thoát try — finally vẫn chạy nhưng component sắp unmount
-
     } catch (e: any) {
       setError(`Lỗi: ${e.message}`);
     } finally {
-      // Luôn reset — nếu navigate thành công, React bỏ qua update vì đã unmount
       setSaving(false);
     }
   };

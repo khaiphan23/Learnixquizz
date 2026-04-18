@@ -17,7 +17,19 @@ export const Library: React.FC = () => {
   const [diff, setDiff] = useState('');
 
   useEffect(() => {
-    getPublicQuizzes().then(q => { setQuizzes(q); setLoading(false); });
+    let cancelled = false;
+    setLoading(true);
+    getPublicQuizzes()
+      .then(q => {
+        if (!cancelled) setQuizzes(q);
+      })
+      .catch(err => {
+        console.error('Library getPublicQuizzes:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [getPublicQuizzes]);
 
   const filtered = quizzes.filter(q => {

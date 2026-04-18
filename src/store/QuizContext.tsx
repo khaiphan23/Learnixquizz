@@ -80,12 +80,14 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsLoading(true);
     const fetchUserData = async () => {
       try {
-        const [{ data: quizData }, { data: attemptData }] = await Promise.all([
+        const [{ data: quizData, error: quizErr }, { data: attemptData, error: attErr }] = await Promise.all([
           supabase.from('quizzes').select('*').eq('author_id', user.id).order('created_at', { ascending: false }),
           supabase.from('attempts').select('*').eq('user_id', user.id),
         ]);
-        setQuizzes((quizData ?? []).map(dbToQuiz));
-        setAttempts((attemptData ?? []).map(dbToAttempt));
+        if (quizErr) console.error('fetchUserData quizzes:', quizErr.message);
+        if (attErr) console.error('fetchUserData attempts:', attErr.message);
+        if (!quizErr) setQuizzes((quizData ?? []).map(dbToQuiz));
+        if (!attErr) setAttempts((attemptData ?? []).map(dbToAttempt));
       } catch (e) {
         console.error('fetchUserData error:', e);
       } finally {
@@ -93,12 +95,10 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     };
     fetchUserData();
-  }, [user?.id, user, authLoading]);
+  }, [user?.id, authLoading]);
 
-  // FIX LỖI 2: addQuiz giờ dùng optimistic update — thêm vào state TRƯỚC khi insert
-  // Nếu insert lỗi thì rollback. Không cần chờ DB để UI cập nhật ngay.
   const addQuiz = async (quiz: Quiz) => {
-    if (!user) return;
+    if (!user) throw new Error('Chưa đăng nhập — không thể lưu quiz');
     const row = quizToDb(quiz, user.id);
     row.author = user.name;
 
@@ -114,7 +114,7 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const editQuiz = async (updatedQuiz: Quiz) => {
-    if (!user) return;
+    if (!user) throw new Error('Chưa đăng nhập — không thể cập nhật quiz');
     const row = quizToDb(updatedQuiz, user.id);
     // Optimistic update
     setQuizzes(prev => prev.map(q => q.id === updatedQuiz.id ? updatedQuiz : q));
@@ -153,9 +153,17 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const togglePublishQuiz = async (id: string, isPublic: boolean) => {
-    const { error } = await supabase.from('quizzes').update({ is_public: isPublic }).eq('id', id);
+    const { data, error } = await supabase
+      .from('quizzes')
+      .update({ is_public: isPublic })
+      .eq('id', id)
+      .select('id');
     if (error) throw new Error(error.message);
-    setQuizzes(prev => prev.map(q => q.id === id ? { ...q, isPublic } : q));
+    if (!data?.length) {
+      throw new Error('Không cập nhật được trạng thái công khai (quiz không tồn tại hoặc không có quyền).');
+    }
+    setQuizzes(prev => prev.map(q => (q.id === id ? { ...q, isPublic } : q)));
+    setPublicQuizzes(prev => prev.map(q => (q.id === id ? { ...q, isPublic } : q)));
   };
 
   const publishQuiz = async (id: string) => {
@@ -163,14 +171,17 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (error) throw new Error(error.message);
   };
 
-  const getPublicQuizzes = async (): Promise<Quiz[]> => {
+  const getPublicQuizzes = useCallback(async (): Promise<Quiz[]> => {
     const { data, error } = await supabase
       .from('quizzes').select('*')
       .eq('is_public', true).is('deleted_at', null)
       .order('created_at', { ascending: false });
-    if (error) return [];
+    if (error) {
+      console.error('getPublicQuizzes:', error.message);
+      return [];
+    }
     return (data ?? []).map(dbToQuiz);
-  };
+  }, []);
 
   const importQuiz = async (quiz: Quiz) => {
     setPublicQuizzes(prev => prev.some(q => q.id === quiz.id) ? prev : [...prev, quiz]);

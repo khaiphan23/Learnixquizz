@@ -119,8 +119,9 @@ export const MyQuizzes: React.FC = () => {
         : (lang === 'vi' ? 'Quiz đã chuyển về riêng tư' : 'Quiz set to private'));
     } catch (e: any) {
       toast(e.message || (lang === 'vi' ? 'Không thể thay đổi' : 'Could not update'), 'error');
+    } finally {
+      setPublishingId(null);
     }
-    setPublishingId(null);
   };
 
   if (!user) return null;

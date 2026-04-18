@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {
-    const { prompt } = request.body;
+    const { prompt, json: wantJson } = request.body as { prompt?: string; json?: boolean };
 
     if (!prompt) {
       return response.status(400).json({ error: 'Prompt là bắt buộc' });
@@ -41,7 +41,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: {
               temperature: 0.7,
-              maxOutputTokens: 2048,
+              maxOutputTokens: 8192,
+              ...(wantJson ? { responseMimeType: 'application/json' as const } : {}),
             },
           }),
           signal: controller.signal,
