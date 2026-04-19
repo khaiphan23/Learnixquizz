@@ -52,7 +52,6 @@ export const CreateQuiz: React.FC = () => {
   const [mcCount, setMcCount] = useState(3);
   const [tfCount, setTfCount] = useState(2);
   const [essayCount, setEssayCount] = useState(1);
-  const [contentDifficulty, setContentDifficulty] = useState<Quiz['difficulty']>('medium');
 
   if (!user) { navigate('/login'); return null; }
 
@@ -130,7 +129,6 @@ export const CreateQuiz: React.FC = () => {
       const generated = await generateQuestionsFromContent(
         content,
         { multipleChoice: mcCount, trueFalse: tfCount, essay: essayCount },
-        contentDifficulty,
         lang
       );
       setQuestions(prev => [...prev.filter(q => q.text.trim()), ...generated.map(q => ({ ...q, id: uuidv4() }))]);
@@ -418,22 +416,6 @@ export const CreateQuiz: React.FC = () => {
               className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
             />
           </div>
-        </div>
-
-        {/* Difficulty for content generation */}
-        <div className="flex items-center gap-3 bg-emerald-100/50 dark:bg-emerald-900/20 rounded-xl p-3">
-          <label className="text-sm font-medium text-emerald-800 dark:text-emerald-300">
-            {lang === 'vi' ? 'Độ khó câu hỏi:' : 'Question Difficulty:'}
-          </label>
-          <select
-            value={contentDifficulty}
-            onChange={e => setContentDifficulty(e.target.value as Quiz['difficulty'])}
-            className="flex-1 px-3 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            <option value="easy">{t.easy}</option>
-            <option value="medium">{t.medium}</option>
-            <option value="hard">{t.hard}</option>
-          </select>
         </div>
 
         {/* Error message */}

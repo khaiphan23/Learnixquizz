@@ -143,7 +143,6 @@ Explain briefly (2-3 sentences) why the correct answer is right.`;
 export async function generateQuestionsFromContent(
   content: string,
   counts: { multipleChoice: number; trueFalse: number; essay: number },
-  difficulty: string,
   language: string
 ): Promise<Question[]> {
   const lang = language === 'en' ? 'English' : 'Vietnamese';
@@ -162,9 +161,8 @@ REQUIREMENTS:
 2. Generate exactly ${counts.multipleChoice} multiple-choice questions (if > 0).
 3. Generate exactly ${counts.trueFalse} true/false questions (if > 0).
 4. Generate exactly ${counts.essay} essay questions (if > 0).
-5. DIFFICULTY LEVEL: ${difficulty} (easy = basic recall, medium = understanding & application, hard = analysis & evaluation)
-6. Questions MUST be derived strictly from the provided content and match the specified difficulty.
-7. Return ONLY a valid JSON array, no markdown, no extra text before/after.
+5. Questions MUST be derived strictly from the provided content.
+6. Return ONLY a valid JSON array, no markdown, no extra text before/after.
 
 Each question object:
 {
