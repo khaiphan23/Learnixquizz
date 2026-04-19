@@ -106,19 +106,49 @@ export const Home: React.FC = () => {
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 max-w-lg mx-auto">
-        {[
-          { icon: <BookOpen className="h-6 w-6 text-indigo-600" />, label: t.myQuizzes, value: activeQuizzes.length },
-          { icon: <Zap className="h-6 w-6 text-yellow-500" />, label: 'AI', value: '✓' },
-          { icon: <Users className="h-6 w-6 text-green-500" />, label: t.leaderboard, value: '✓' },
-        ].map((s, i) => (
-          <div key={i} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 text-center space-y-2">
-            <div className="flex justify-center">{s.icon}</div>
-            <p className="text-2xl font-black text-slate-900 dark:text-white">{s.value}</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">{s.label}</p>
+      {/* Stats - Card ngang giống Lịch sử thi */}
+      <div className="grid md:grid-cols-3 gap-4 max-w-4xl mx-auto">
+        {/* Bộ quiz của tôi */}
+        <div
+          onClick={() => navigate('/my-quizzes')}
+          className="flex items-center gap-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+        >
+          <div className="w-12 h-12 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+            <BookOpen className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
           </div>
-        ))}
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-slate-900 dark:text-white text-base">Bộ quiz của tôi</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Quản lý và chỉnh sửa các quiz đã tạo</p>
+          </div>
+        </div>
+
+        {/* Tạo quiz bằng AI */}
+        <div
+          onClick={() => navigate('/create')}
+          className="flex items-center gap-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+        >
+          <div className="w-12 h-12 rounded-xl bg-yellow-100 dark:bg-yellow-900/40 flex items-center justify-center flex-shrink-0">
+            <Zap className="h-6 w-6 text-yellow-600 dark:text-yellow-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-slate-900 dark:text-white text-base">Tạo quiz bằng AI</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Sinh quiz tự động từ nội dung</p>
+          </div>
+        </div>
+
+        {/* Bảng xếp hạng */}
+        <div
+          onClick={() => navigate('/library')}
+          className="flex items-center gap-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+        >
+          <div className="w-12 h-12 rounded-xl bg-green-100 dark:bg-green-900/40 flex items-center justify-center flex-shrink-0">
+            <Users className="h-6 w-6 text-green-600 dark:text-green-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-slate-900 dark:text-white text-base">Bảng xếp hạng</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Xem thứ hạng người chơi</p>
+          </div>
+        </div>
       </div>
 
       {/* Recent quizzes */}

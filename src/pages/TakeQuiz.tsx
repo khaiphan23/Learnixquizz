@@ -5,11 +5,11 @@ import { useAuth } from '../store/AuthContext';
 import { useLang } from '../store/LangContext';
 import { Button, Spinner, Card } from '../components/ui';
 import { v4 as uuidv4 } from 'uuid';
-import { BookOpen, Clock, BarChart2, AlertCircle } from 'lucide-react';
+import { Clock, AlertCircle, Hash, FileText, BarChart3, Play, Calendar } from 'lucide-react';
 
 export const TakeQuiz: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { getQuiz, fetchQuizById, addAttempt } = useQuizStore();
+  const { getQuiz, fetchQuizById, addAttempt, fetchAttemptsForQuiz } = useQuizStore();
   const { user } = useAuth();
   const { t } = useLang();
   const navigate = useNavigate();
@@ -20,14 +20,19 @@ export const TakeQuiz: React.FC = () => {
   const [answers, setAnswers] = useState<Record<string, number | string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [currentQ, setCurrentQ] = useState(0);
+  const [attemptCount, setAttemptCount] = useState(0);
 
   useEffect(() => {
     const load = async () => {
-      if (id) await fetchQuizById(id);
+      if (id) {
+        await fetchQuizById(id);
+        const attempts = await fetchAttemptsForQuiz(id);
+        setAttemptCount(attempts.length);
+      }
       setLoading(false);
     };
     load();
-  }, [id, fetchQuizById]);
+  }, [id, fetchQuizById, fetchAttemptsForQuiz]);
 
   const quiz = getQuiz(id ?? '');
 
@@ -44,29 +49,91 @@ export const TakeQuiz: React.FC = () => {
 
   if (!started) {
     return (
-      <div className="max-w-lg mx-auto px-4 py-12 space-y-6">
-        <Card className="p-8 space-y-6 text-center">
-          <div className="space-y-2">
-            <h1 className="text-2xl font-black text-slate-900 dark:text-white">{quiz.title}</h1>
-            {quiz.description && <p className="text-slate-500 dark:text-slate-400">{quiz.description}</p>}
-          </div>
-          <div className="flex justify-center gap-6 text-sm text-slate-600 dark:text-slate-400">
-            <span className="flex items-center gap-1.5"><BookOpen className="h-4 w-4 text-indigo-500" />{quiz.questions.length} {t.questions}</span>
-            <span className="flex items-center gap-1.5"><BarChart2 className="h-4 w-4 text-yellow-500" />{diffLabel[quiz.difficulty]}</span>
-            <span className="flex items-center gap-1.5"><Clock className="h-4 w-4 text-green-500" />{quiz.topic}</span>
-          </div>
-          {!user && (
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 text-left">{t.guestName}</label>
-              <input value={guestName} onChange={e => setGuestName(e.target.value)}
-                placeholder={t.enterName}
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-              <p className="text-xs text-slate-400 text-left">{t.playAsGuest}</p>
+      <div className="max-w-2xl mx-auto px-4 py-12">
+        {/* Card lớn, bo góc, shadow, căn giữa */}
+        <Card className="overflow-hidden shadow-xl">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-indigo-600 to-violet-600 px-8 py-6 text-center">
+            <h1 className="text-2xl md:text-3xl font-black text-white">{quiz.title}</h1>
+            <div className="flex items-center justify-center gap-2 mt-2 text-indigo-100">
+              <Hash className="h-4 w-4" />
+              <span className="text-sm font-mono">Mã đề thi: {quiz.shortCode || quiz.id.slice(0, 8).toUpperCase()}</span>
             </div>
-          )}
-          <Button size="lg" className="w-full" onClick={() => setStarted(true)} disabled={!user && !guestName.trim()}>
-            {t.startQuiz}
-          </Button>
+          </div>
+
+          {/* Thông tin chi tiết */}
+          <div className="p-8 space-y-6">
+            {/* Danh sách thông tin */}
+            <div className="grid md:grid-cols-2 gap-4">
+              {/* Thời gian làm bài */}
+              <div className="flex items-center gap-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4">
+                <div className="w-10 h-10 rounded-lg bg-orange-100 dark:bg-orange-900/40 flex items-center justify-center flex-shrink-0">
+                  <Clock className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Thời gian làm bài</p>
+                  <p className="font-semibold text-slate-900 dark:text-white">{quiz.questions.length * 2} phút</p>
+                </div>
+              </div>
+
+              {/* Số lượng câu hỏi */}
+              <div className="flex items-center gap-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4">
+                <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center flex-shrink-0">
+                  <FileText className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Số lượng câu hỏi</p>
+                  <p className="font-semibold text-slate-900 dark:text-white">{quiz.questions.length} câu</p>
+                </div>
+              </div>
+
+              {/* Loại đề */}
+              <div className="flex items-center gap-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4">
+                <div className="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center flex-shrink-0">
+                  <BarChart3 className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Loại đề</p>
+                  <p className="font-semibold text-slate-900 dark:text-white">{diffLabel[quiz.difficulty]}</p>
+                </div>
+              </div>
+
+              {/* Tổng lượt đã làm */}
+              <div className="flex items-center gap-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl p-4">
+                <div className="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900/40 flex items-center justify-center flex-shrink-0">
+                  <Calendar className="h-5 w-5 text-green-600 dark:text-green-400" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Tổng lượt đã làm</p>
+                  <p className="font-semibold text-slate-900 dark:text-white">{attemptCount} lượt</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Guest name input (if not logged in) */}
+            {!user && (
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t.guestName}</label>
+                <input
+                  value={guestName}
+                  onChange={e => setGuestName(e.target.value)}
+                  placeholder={t.enterName}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+                <p className="text-xs text-slate-400">{t.playAsGuest}</p>
+              </div>
+            )}
+
+            {/* Button Bắt đầu luyện tập - full width, cam, bo góc lớn */}
+            <button
+              onClick={() => setStarted(true)}
+              disabled={!user && !guestName.trim()}
+              className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-2xl bg-orange-500 hover:bg-orange-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold text-lg transition-all shadow-lg hover:shadow-xl"
+            >
+              <Play className="h-5 w-5" />
+              <span>Bắt đầu luyện tập</span>
+            </button>
+          </div>
         </Card>
       </div>
     );
