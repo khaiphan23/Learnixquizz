@@ -18,15 +18,15 @@ export async function parseTxt(file: File): Promise<string> {
   });
 }
 
-// Worker singleton - chỉ cấu hình một lần
+// PDF.js worker - dùng legacy build để tránh lỗi ES module
 let pdfjsInitialized = false;
 
 async function initPdfjs() {
   if (pdfjsInitialized) return;
 
   const pdfjsLib = await import('pdfjs-dist');
-  // Sử dụng CDN worker - ổn định cho cả local và production
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.6.205/pdf.worker.min.mjs`;
+  // Dùng legacy build (UMD) - hoạt động tốt trong mọi môi trường
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.6.205/pdf.worker.min.js`;
   pdfjsInitialized = true;
 }
 
@@ -40,6 +40,7 @@ export async function parsePdf(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({
     data: arrayBuffer,
+    useSystemFonts: true,
   }).promise;
 
   const textParts: string[] = [];
