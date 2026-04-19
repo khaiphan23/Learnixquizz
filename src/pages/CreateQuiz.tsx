@@ -314,7 +314,7 @@ export const CreateQuiz: React.FC = () => {
             >
               <input
                 type="file"
-                accept=".txt,.pdf,.docx"
+                accept=".txt,.md,.rtf,.pdf,.docx"
                 onChange={handleFileChange}
                 className="hidden"
                 id="file-upload"
