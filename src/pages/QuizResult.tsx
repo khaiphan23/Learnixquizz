@@ -13,7 +13,7 @@ export const QuizResult: React.FC = () => {
   const { state } = useLocation();
   const navigate = useNavigate();
   const { getQuiz, attempts, updateAttempt, fetchAttemptsForQuiz } = useQuizStore();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const attemptId = state?.attemptId;
   const [localAttempt, setLocalAttempt] = useState<QuizAttempt | null>(null);
   const [leaderboard, setLeaderboard] = useState<QuizAttempt[]>([]);
@@ -95,7 +95,7 @@ export const QuizResult: React.FC = () => {
           </div>
         ) : (
           <>
-            <h1 className="text-2xl font-black text-slate-900 dark:text-white">{t.lang === 'vi' ? 'Hoàn thành!' : 'Complete!'}</h1>
+            <h1 className="text-2xl font-black text-slate-900 dark:text-white">{lang === 'vi' ? 'Hoàn thành!' : 'Complete!'}</h1>
             <div className={`inline-flex items-center justify-center w-32 h-32 rounded-full ${scoreBg} ${scoreColor} text-4xl font-black`}>{Math.round(sc)}%</div>
             <p className="text-slate-500 dark:text-slate-400">{t.score}: <span className="font-bold text-slate-900 dark:text-white">{Math.round(sc)}%</span></p>
             <div className="flex justify-center gap-3 pt-2">
@@ -114,7 +114,7 @@ export const QuizResult: React.FC = () => {
               <div key={idx} className={`flex items-center justify-between p-3 rounded-xl ${entry.id === currentAttempt.id ? 'bg-white/20 border border-white/30' : 'bg-white/10'}`}>
                 <div className="flex items-center gap-3">
                   <div className={`w-7 h-7 flex items-center justify-center rounded-full font-bold text-sm ${idx === 0 ? 'bg-yellow-400 text-yellow-900' : idx === 1 ? 'bg-slate-300 text-slate-800' : idx === 2 ? 'bg-orange-400 text-orange-900' : 'bg-indigo-700 text-white'}`}>{idx + 1}</div>
-                  <span className="font-medium truncate max-w-[150px]">{entry.userName ?? t.lang === 'vi' ? 'Ẩn danh' : 'Anonymous'}</span>
+                  <span className="font-medium truncate max-w-[150px]">{entry.userName ?? (lang === 'vi' ? 'Ẩn danh' : 'Anonymous')}</span>
                   {entry.id === currentAttempt.id && <span className="text-xs bg-indigo-500 px-2 py-0.5 rounded text-white">{t.you}</span>}
                 </div>
                 <span className="font-bold">{Math.round(entry.score)}%</span>
@@ -168,7 +168,7 @@ export const QuizResult: React.FC = () => {
                     <button onClick={() => fetchExplanation(q.id)} disabled={loadingExplanation === q.id}
                       className="flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 font-medium">
                       {loadingExplanation === q.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <BrainCircuit className="h-4 w-4" />}
-                      {t.lang === 'vi' ? 'Hỏi AI tại sao tôi sai' : 'Ask AI why I was wrong'}
+                      {lang === 'vi' ? 'Hỏi AI tại sao tôi sai' : 'Ask AI why I was wrong'}
                     </button>
                   )}
                   {aiExplanations[q.id] && (

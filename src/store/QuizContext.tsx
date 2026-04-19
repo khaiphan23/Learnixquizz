@@ -217,13 +217,13 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const getAllAttemptsForQuiz = (quizId: string) => attempts.filter(a => a.quizId === quizId);
 
-  const fetchAttemptsForQuiz = async (quizId: string): Promise<QuizAttempt[]> => {
+  const fetchAttemptsForQuiz = useCallback(async (quizId: string): Promise<QuizAttempt[]> => {
     const { data, error } = await supabase
       .from('attempts').select('*').eq('quiz_id', quizId)
       .order('score', { ascending: false });
     if (error) return [];
     return (data ?? []).map(dbToAttempt);
-  };
+  }, []);
 
   return (
     <QuizContext.Provider value={{

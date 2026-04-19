@@ -41,6 +41,7 @@ export interface Quiz {
   deletedAt?: string;
   isPublic: boolean;
   shortCode?: string;
+  duration?: number;
 }
 
 export interface EssayGrade {

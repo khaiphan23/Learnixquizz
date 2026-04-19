@@ -138,7 +138,7 @@ export const Home: React.FC = () => {
 
         {/* Bảng xếp hạng */}
         <div
-          onClick={() => navigate('/library')}
+          onClick={() => navigate('/leaderboard')}
           className="flex items-center gap-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
         >
           <div className="w-12 h-12 rounded-xl bg-green-100 dark:bg-green-900/40 flex items-center justify-center flex-shrink-0">

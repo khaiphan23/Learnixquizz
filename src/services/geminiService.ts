@@ -158,12 +158,11 @@ ${content}
 
 REQUIREMENTS:
 1. Analyze the content and identify all key concepts, facts, and arguments.
-2. Automatically determine the optimal number and mix of question types:
-   - Multiple-choice (4 options A, B, C, D) for factual and conceptual knowledge.
-   - True/False for clarifying common misconceptions or key facts.
-   - Essay for synthesis and deeper understanding.
-3. The total number of questions should be proportional to the length and complexity of the content. Prioritize quality and coverage over a fixed count.
-4. Return ONLY a valid JSON array, no markdown, no extra text before/after.
+2. Generate exactly ${counts.multipleChoice} multiple-choice questions (if > 0).
+3. Generate exactly ${counts.trueFalse} true/false questions (if > 0).
+4. Generate exactly ${counts.essay} essay questions (if > 0).
+5. Questions MUST be derived strictly from the provided content.
+6. Return ONLY a valid JSON array, no markdown, no extra text before/after.
 
 Each question object:
 {

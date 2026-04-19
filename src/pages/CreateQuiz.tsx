@@ -28,6 +28,7 @@ export const CreateQuiz: React.FC = () => {
   const [description, setDescription] = useState(existing?.description ?? '');
   const [topic, setTopic] = useState(existing?.topic ?? '');
   const [difficulty, setDifficulty] = useState<Quiz['difficulty']>(existing?.difficulty ?? 'medium');
+  const [duration, setDuration] = useState(existing?.duration ?? 15);
   const [questions, setQuestions] = useState<Question[]>(existing?.questions ?? [emptyQuestion()]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -161,6 +162,7 @@ export const CreateQuiz: React.FC = () => {
         deletedAt: undefined,
         isPublic: existing?.isPublic ?? false,
         shortCode,
+        duration,
       };
 
       if (existing) {
@@ -192,10 +194,20 @@ export const CreateQuiz: React.FC = () => {
       <Card className="p-6 space-y-4">
         <Input label={t.title} value={title} onChange={e => setTitle(e.target.value)} placeholder={lang === 'vi' ? 'Tiêu đề quiz...' : 'Quiz title...'} />
         <Textarea label={t.description} value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder={lang === 'vi' ? 'Mô tả (tuỳ chọn)...' : 'Description (optional)...'} />
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <Input label={t.topic} value={topic} onChange={e => setTopic(e.target.value)} placeholder={lang === 'vi' ? 'Toán, Lý, Sử...' : 'Math, Science...'} />
           <Select label={t.difficulty} value={difficulty} onChange={e => setDifficulty(e.target.value as Quiz['difficulty'])}
             options={[{ value: 'easy', label: t.easy }, { value: 'medium', label: t.medium }, { value: 'hard', label: t.hard }]} />
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{lang === 'vi' ? 'Thời gian (phút)' : 'Duration (minutes)'}</label>
+            <input
+              type="number"
+              value={duration}
+              onChange={(e) => setDuration(Number(e.target.value))}
+              min={1}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
         </div>
       </Card>
 

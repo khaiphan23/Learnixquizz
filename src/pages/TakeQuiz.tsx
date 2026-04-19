@@ -11,7 +11,7 @@ export const TakeQuiz: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { getQuiz, fetchQuizById, addAttempt, fetchAttemptsForQuiz } = useQuizStore();
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
@@ -72,7 +72,7 @@ export const TakeQuiz: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Thời gian làm bài</p>
-                  <p className="font-semibold text-slate-900 dark:text-white">{quiz.questions.length * 2} phút</p>
+                  <p className="font-semibold text-slate-900 dark:text-white">{quiz.duration || quiz.questions.length * 2} phút</p>
                 </div>
               </div>
 
@@ -213,14 +213,14 @@ export const TakeQuiz: React.FC = () => {
 
       {/* Navigation */}
       <div className="flex justify-between">
-        <Button variant="outline" onClick={() => setCurrentQ(prev => prev - 1)} disabled={currentQ === 0}>← {t.lang === 'vi' ? 'Trước' : 'Prev'}</Button>
+        <Button variant="outline" onClick={() => setCurrentQ(prev => prev - 1)} disabled={currentQ === 0}>← {lang === 'vi' ? 'Trước' : 'Prev'}</Button>
         {isLast ? (
           <Button isLoading={submitting} onClick={handleSubmit} disabled={answers[q.id] === undefined}>
             {t.submit} ✓
           </Button>
         ) : (
           <Button onClick={() => setCurrentQ(prev => prev + 1)} disabled={answers[q.id] === undefined}>
-            {t.lang === 'vi' ? 'Tiếp' : 'Next'} →
+            {lang === 'vi' ? 'Tiếp' : 'Next'} →
           </Button>
         )}
       </div>
