@@ -49,9 +49,6 @@ export const CreateQuiz: React.FC = () => {
   const [isExtracting, setIsExtracting] = useState(false);
   const [genError, setGenError] = useState('');
   const [showPreview, setShowPreview] = useState(false);
-  const [mcCount, setMcCount] = useState(3);
-  const [tfCount, setTfCount] = useState(2);
-  const [essayCount, setEssayCount] = useState(1);
 
   if (!user) { navigate('/login'); return null; }
 
@@ -112,25 +109,18 @@ export const CreateQuiz: React.FC = () => {
     }
   };
 
-  // Auto-generate from extracted/pasted content
+  // Auto-generate from extracted/pasted content - AI auto-detects all questions
   const autoGenerateFromContent = async (content: string) => {
     setGenError('');
     if (!content.trim()) {
       setGenError(lang === 'vi' ? `Vui lòng nhập nội dung hoặc trích xuất từ file` : `Please enter or extract content first`);
       return;
     }
-    if (mcCount === 0 && tfCount === 0 && essayCount === 0) {
-      setGenError(lang === 'vi' ? 'Vui lòng chọn ít nhất 1 loại câu hỏi' : 'Please select at least one question type');
-      return;
-    }
 
     setAiGenerating(true);
     try {
-      const generated = await generateQuestionsFromContent(
-        content,
-        { multipleChoice: mcCount, trueFalse: tfCount, essay: essayCount },
-        lang
-      );
+      // AI tự động phân tích và trích xuất tất cả câu hỏi từ nội dung
+      const generated = await generateQuestionsFromContent(content, lang);
       setQuestions(prev => [...prev.filter(q => q.text.trim()), ...generated.map(q => ({ ...q, id: uuidv4() }))]);
       // Optional: fill quiz details from content
       if (!topic) setTopic(content.substring(0, 50) + (content.length > 50 ? '...' : ''));
@@ -381,41 +371,14 @@ export const CreateQuiz: React.FC = () => {
           </div>
         )}
 
-        {/* Question type counts */}
-        <div className="grid grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.multipleChoice}</label>
-            <input
-              type="number"
-              min="0"
-              max="20"
-              value={mcCount}
-              onChange={e => setMcCount(Number(e.target.value))}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.trueFalse}</label>
-            <input
-              type="number"
-              min="0"
-              max="20"
-              value={tfCount}
-              onChange={e => setTfCount(Number(e.target.value))}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.essay}</label>
-            <input
-              type="number"
-              min="0"
-              max="10"
-              value={essayCount}
-              onChange={e => setEssayCount(Number(e.target.value))}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
-            />
-          </div>
+        {/* AI will automatically detect all questions from content */}
+        <div className="text-sm text-emerald-700 dark:text-emerald-300 bg-emerald-100/50 dark:bg-emerald-900/20 rounded-xl p-3">
+          <p className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4" />
+            {lang === 'vi' 
+              ? 'AI sẽ tự động phân tích và trích xuất tất cả câu hỏi từ nội dung (trắc nghiệm, đúng/sai, tự luận) và tự nhận diện đáp án đúng.'
+              : 'AI will automatically analyze and extract all questions from content (multiple-choice, true/false, essay) and detect correct answers.'}
+          </p>
         </div>
 
         {/* Error message */}

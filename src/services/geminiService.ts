@@ -142,7 +142,6 @@ Explain briefly (2-3 sentences) why the correct answer is right.`;
 
 export async function generateQuestionsFromContent(
   content: string,
-  counts: { multipleChoice: number; trueFalse: number; essay: number },
   language: string
 ): Promise<Question[]> {
   const lang = language === 'en' ? 'English' : 'Vietnamese';
@@ -151,40 +150,54 @@ export async function generateQuestionsFromContent(
     throw new Error('Nội dung trống — vui lòng nhập hoặc trích xuất nội dung trước');
   }
 
-  const prompt = `You are an expert quiz generator. Analyze the following content and generate a comprehensive set of quiz questions based on it.
+  const prompt = `You are an expert quiz parser and generator. Analyze the following content and extract/generate quiz questions from it.
 
 CONTENT:
 ${content}
 
-REQUIREMENTS:
-1. Analyze the content and identify all key concepts, facts, and arguments.
-2. Generate exactly ${counts.multipleChoice} multiple-choice questions (if > 0).
-3. Generate exactly ${counts.trueFalse} true/false questions (if > 0).
-4. Generate exactly ${counts.essay} essay questions (if > 0).
-5. Questions MUST be derived strictly from the provided content.
-6. Return ONLY a valid JSON array, no markdown, no extra text before/after.
+TASK:
+1. Analyze the content thoroughly to identify ALL quiz questions present.
+2. Automatically detect the question types:
+   - Multiple-choice: Questions with options A, B, C, D (or numbered options)
+   - True/False: Questions with "Đúng/Sai" or "True/False" answers
+   - Essay: Open-ended questions with sample/model answers
+3. For each question, identify the CORRECT ANSWER by looking for:
+   - Visual formatting (bold text, different color markers, asterisks)
+   - Text indicators ("Đáp án đúng là", "Correct answer", "Answer:")
+   - Underlined or highlighted text
+   - Check marks or correct indicators
+4. Extract ALL questions found - do not limit the number.
+5. Determine appropriate difficulty based on content complexity.
 
-Each question object:
-{
-  "type": "multiple-choice" | "true-false" | "essay",
-  "text": "question text based on the content",
-  "options": ["A", "B", "C", "D"] (for MC) OR ["Đúng", "Sai"] or ["True", "False"] (for TF),
-  "correctAnswerIndex": number from 0 to 3 (MC) or 0 or 1 (TF),
-  "explanation": "brief explanation why the correct answer is correct" (REQUIRED for MC and TF),
-  "sampleAnswer": "comprehensive sample answer" (REQUIRED for essay)
-}
+RETURN FORMAT:
+Return ONLY a valid JSON array with all detected questions:
+[
+  {
+    "type": "multiple-choice",
+    "text": "question text",
+    "options": ["A", "B", "C", "D"],
+    "correctAnswerIndex": 0,
+    "explanation": "why this is correct"
+  },
+  {
+    "type": "true-false",
+    "text": "statement",
+    "options": ["Đúng", "Sai"],
+    "correctAnswerIndex": 0,
+    "explanation": "explanation"
+  },
+  {
+    "type": "essay",
+    "text": "question",
+    "sampleAnswer": "comprehensive answer"
+  }
+]
 
-RULES:
-1. Questions MUST be strictly derived from the provided content.
-2. For multiple-choice: provide exactly 4 distinct plausible options; only one is correct.
-3. For true-false: use ["Đúng","Sai"] if language is Vietnamese, ["True","False"] if English.
-4. correctAnswerIndex must match the position of the correct option in the options array (0-based).
-5. Explanation must clearly explain why the correct answer is correct (2-3 sentences).
-6. Essay: sampleAnswer should be a model answer.
-7. ALL fields are required as specified.
-8. Output must be valid JSON that can be parsed by JSON.parse().
-9. Do not include any text outside the JSON array.
-10. For language=${lang}, write questions and explanations in ${lang}.`;
+IMPORTANT:
+- Return ONLY valid JSON, no markdown, no extra text
+- Include ALL questions found in the content
+- Detect correct answers from formatting cues (bold, color, markers)
+- Use ${lang} language for output`;
 
   try {
     const text = await callGemini(prompt);
