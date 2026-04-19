@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuizStore } from '../store/QuizContext';
 import { useAuth } from '../store/AuthContext';
 import { useLang } from '../store/LangContext';
 import { Button, Spinner, Card } from '../components/ui';
 import { v4 as uuidv4 } from 'uuid';
-import { Clock, AlertCircle, Hash, FileText, BarChart3, Play, Calendar } from 'lucide-react';
+import { Clock, AlertCircle, Hash, FileText, BarChart3, Play, Calendar, Timer } from 'lucide-react';
 
 export const TakeQuiz: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -21,6 +21,54 @@ export const TakeQuiz: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [currentQ, setCurrentQ] = useState(0);
   const [attemptCount, setAttemptCount] = useState(0);
+  const [timeLeft, setTimeLeft] = useState<number>(0);
+  const [timeExpired, setTimeExpired] = useState(false);
+  const submittedRef = useRef(false);
+
+  const quiz = getQuiz(id ?? '');
+
+  // Submit function - defined early to avoid hoisting issues
+  const submitQuiz = useCallback(async (isAutoSubmit = false) => {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
+    setSubmitting(true);
+
+    try {
+      if (id) localStorage.removeItem(`quiz_timer_${id}`);
+      if (!quiz) return;
+
+      const hasEssay = quiz.questions.some(q => q.type === 'essay');
+      let score = 0;
+      if (!hasEssay) {
+        quiz.questions.forEach(q => {
+          if (q.type !== 'essay' && answers[q.id] === q.correctAnswerIndex) score++;
+        });
+        score = (score / quiz.questions.length) * 100;
+      }
+      const attemptId = uuidv4();
+      const attempt = {
+        id: attemptId,
+        quizId: quiz.id,
+        userId: user?.id ?? `guest-${uuidv4()}`,
+        userName: user?.name ?? guestName,
+        answers,
+        score,
+        essayGrades: {},
+        timestamp: Date.now(),
+        status: (hasEssay ? 'pending-grading' : 'completed') as 'completed' | 'pending-grading',
+      };
+      await addAttempt(attempt);
+      navigate(`/result/${quiz.id}`, { state: { attemptId, autoSubmitted: isAutoSubmit } });
+    } catch (e) {
+      console.error(e);
+      submittedRef.current = false;
+    } finally {
+      setSubmitting(false);
+    }
+  }, [answers, guestName, id, navigate, quiz, user, addAttempt]);
+
+  const handleSubmit = () => submitQuiz(false);
+  const handleAutoSubmit = useCallback(() => submitQuiz(true), [submitQuiz]);
 
   useEffect(() => {
     const load = async () => {
@@ -34,7 +82,49 @@ export const TakeQuiz: React.FC = () => {
     load();
   }, [id, fetchQuizById, fetchAttemptsForQuiz]);
 
-  const quiz = getQuiz(id ?? '');
+  // Load saved timer from localStorage when quiz starts
+  useEffect(() => {
+    if (started && quiz && id) {
+      const storageKey = `quiz_timer_${id}`;
+      const saved = localStorage.getItem(storageKey);
+      const duration = (quiz.duration || quiz.questions.length * 2) * 60; // seconds
+
+      if (saved) {
+        const { endTime } = JSON.parse(saved);
+        const remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+        setTimeLeft(remaining);
+      } else {
+        const endTime = Date.now() + duration * 1000;
+        localStorage.setItem(storageKey, JSON.stringify({ endTime }));
+        setTimeLeft(duration);
+      }
+    }
+  }, [started, quiz, id]);
+
+  // Countdown timer
+  useEffect(() => {
+    if (!started || timeLeft <= 0) return;
+
+    const interval = setInterval(() => {
+      setTimeLeft(prev => {
+        const next = prev - 1;
+        if (next <= 0) {
+          setTimeExpired(true);
+          clearInterval(interval);
+        }
+        return Math.max(0, next);
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [started, timeLeft]);
+
+  // Auto-submit when time expires
+  useEffect(() => {
+    if (timeExpired && !submittedRef.current) {
+      handleAutoSubmit();
+    }
+  }, [timeExpired, handleAutoSubmit]);
 
   if (loading) return <div className="flex justify-center py-20"><Spinner size="lg" /></div>;
   if (!quiz) return (
@@ -143,40 +233,30 @@ export const TakeQuiz: React.FC = () => {
   const isLast = currentQ === quiz.questions.length - 1;
   const progress = ((currentQ) / quiz.questions.length) * 100;
 
-  const handleSubmit = async () => {
-    setSubmitting(true);
-    try {
-      const hasEssay = quiz.questions.some(q => q.type === 'essay');
-      let score = 0;
-      if (!hasEssay) {
-        quiz.questions.forEach(q => {
-          if (q.type !== 'essay' && answers[q.id] === q.correctAnswerIndex) score++;
-        });
-        score = (score / quiz.questions.length) * 100;
-      }
-      const attemptId = uuidv4();
-      const attempt = {
-        id: attemptId,
-        quizId: quiz.id,
-        userId: user?.id ?? `guest-${uuidv4()}`,
-        userName: user?.name ?? guestName,
-        answers,
-        score,
-        essayGrades: {},
-        timestamp: Date.now(),
-        status: (hasEssay ? 'pending-grading' : 'completed') as 'completed' | 'pending-grading',
-      };
-      await addAttempt(attempt);
-      navigate(`/result/${quiz.id}`, { state: { attemptId } });
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSubmitting(false);
-    }
+  // Format time display
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Determine timer color based on remaining time
+  const getTimerColor = () => {
+    if (timeLeft <= 60) return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800';
+    if (timeLeft <= 300) return 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/30 border-orange-200 dark:border-orange-800';
+    return 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-800';
   };
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
+      {/* Timer - Fixed top right */}
+      <div className="fixed top-4 right-4 z-50">
+        <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border shadow-lg ${getTimerColor()}`}>
+          <Timer className="h-5 w-5" />
+          <span className="font-mono font-bold text-lg">{formatTime(timeLeft)}</span>
+        </div>
+      </div>
+
       {/* Progress */}
       <div className="space-y-2">
         <div className="flex justify-between text-sm text-slate-500 dark:text-slate-400">
@@ -189,21 +269,35 @@ export const TakeQuiz: React.FC = () => {
       </div>
 
       {/* Question */}
-      <Card className="p-6 space-y-6">
+      <Card className={`p-6 space-y-6 ${timeExpired ? 'opacity-75 pointer-events-none' : ''}`}>
+        {timeExpired && (
+          <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-xl p-4 text-center">
+            <p className="text-red-700 dark:text-red-300 font-semibold">
+              {lang === 'vi' ? '⏰ Hết thời gian! Bài thi đang được nộp tự động...' : '⏰ Time\'s up! Auto-submitting your quiz...'}
+            </p>
+          </div>
+        )}
         <div className="space-y-3">
           <p className="text-lg font-semibold text-slate-900 dark:text-white">{q.text}</p>
           {q.imageUrl && <img src={q.imageUrl} alt="" className="max-h-48 rounded-xl object-cover border border-slate-200 dark:border-slate-700" />}
         </div>
 
         {q.type === 'essay' ? (
-          <textarea value={(answers[q.id] as string) ?? ''} onChange={e => setAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
-            placeholder={t.yourAnswer} rows={5}
-            className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
+          <textarea
+            value={(answers[q.id] as string) ?? ''}
+            onChange={e => setAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+            placeholder={t.yourAnswer}
+            rows={5}
+            disabled={timeExpired}
+            className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none disabled:bg-slate-100 disabled:cursor-not-allowed" />
         ) : (
           <div className="space-y-2">
             {q.options.map((opt, oi) => (
-              <button key={oi} onClick={() => setAnswers(prev => ({ ...prev, [q.id]: oi }))}
-                className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all font-medium text-sm ${answers[q.id] === oi ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'border-slate-200 dark:border-slate-600 hover:border-indigo-300 text-slate-700 dark:text-slate-300'}`}>
+              <button
+                key={oi}
+                onClick={() => setAnswers(prev => ({ ...prev, [q.id]: oi }))}
+                disabled={timeExpired}
+                className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed ${answers[q.id] === oi ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'border-slate-200 dark:border-slate-600 hover:border-indigo-300 text-slate-700 dark:text-slate-300'}`}>
                 <span className="mr-3 text-xs font-bold text-slate-400">{String.fromCharCode(65 + oi)}.</span>{opt}
               </button>
             ))}

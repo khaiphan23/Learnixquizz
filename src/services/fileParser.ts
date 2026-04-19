@@ -18,20 +18,28 @@ export async function parseTxt(file: File): Promise<string> {
   });
 }
 
+// Worker singleton - chỉ cấu hình một lần
+let pdfjsInitialized = false;
+
+async function initPdfjs() {
+  if (pdfjsInitialized) return;
+
+  const pdfjsLib = await import('pdfjs-dist');
+  // Sử dụng CDN worker - ổn định cho cả local và production
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.6.205/pdf.worker.min.mjs`;
+  pdfjsInitialized = true;
+}
+
 export async function parsePdf(file: File): Promise<string> {
   validateFile(file);
-  const pdfjsLib = await import('pdfjs-dist');
 
-  // CẤU HÌNH TUYỆT ĐỐI AN TOÀN CHO VERCEL:
-  // Tắt worker hoàn toàn để tránh lỗi "Failed to fetch dynamically imported module"
-  // Điều này khiến PDF được parse trên luồng chính, tránh mọi vấn đề CSP/Blob
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+  // Initialize PDF.js worker (chỉ chạy một lần)
+  await initPdfjs();
+  const pdfjsLib = await import('pdfjs-dist');
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({
     data: arrayBuffer,
-    useWorkerFetch: false,
-    isEvalSupported: false,
   }).promise;
 
   const textParts: string[] = [];

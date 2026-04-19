@@ -227,6 +227,7 @@ export const MyQuizzes: React.FC = () => {
                   onClick={() => navigate(`/quiz/${quiz.id}`)}
                   showActions
                   onEdit={() => navigate(`/edit/${quiz.id}`)}
+                  onStats={() => navigate(`/quiz/${quiz.id}/stats`)}
                   onTogglePublish={() => handleTogglePublish(quiz.id, quiz.isPublic)}
                   onDelete={() => handleDelete(quiz.id, quiz.title)}
                 />

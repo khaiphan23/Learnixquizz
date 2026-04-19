@@ -12,6 +12,7 @@ import { TakeQuiz } from './pages/TakeQuiz';
 import { QuizResult } from './pages/QuizResult';
 import { Library, Settings } from './pages/LibrarySettings';
 import { ResetPassword } from './pages/ResetPassword';
+import { QuizStats } from './pages/QuizStats';
 import { Spinner } from './components/ui';
 import { supabase } from './services/supabase';
 
@@ -85,6 +86,7 @@ const AppLayout: React.FC = () => {
           <Route path="/my-quizzes" element={<ProtectedRoute><MyQuizzes /></ProtectedRoute>} />
           <Route path="/create" element={<ProtectedRoute><CreateQuiz /></ProtectedRoute>} />
           <Route path="/edit/:id" element={<ProtectedRoute><CreateQuiz /></ProtectedRoute>} />
+          <Route path="/quiz/:id/stats" element={<ProtectedRoute><QuizStats /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

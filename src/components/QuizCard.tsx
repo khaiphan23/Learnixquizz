@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Quiz } from '../types';
 import { useLang } from '../store/LangContext';
 import { Badge, Card } from './ui';
-import { BookOpen, BarChart2, Globe, Lock, Trash2, Share2, Link2, Hash, Check, Pencil } from 'lucide-react';
+import { BookOpen, BarChart2, Globe, Lock, Trash2, Share2, Link2, Hash, Check, Pencil, TrendingUp } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface QuizCardProps {
@@ -11,6 +11,7 @@ interface QuizCardProps {
   onDelete?: () => void;
   onTogglePublish?: () => void;
   onEdit?: () => void;
+  onStats?: () => void;
   showActions?: boolean;
 }
 
@@ -118,7 +119,7 @@ const ShareModal: React.FC<{ quiz: Quiz; onClose: () => void }> = ({ quiz, onClo
   );
 };
 
-export const QuizCard: React.FC<QuizCardProps> = ({ quiz, onClick, onDelete, onTogglePublish, onEdit, showActions }) => {
+export const QuizCard: React.FC<QuizCardProps> = ({ quiz, onClick, onDelete, onTogglePublish, onEdit, onStats, showActions }) => {
   const { t, lang } = useLang();
   const navigate = useNavigate();
   const [showShare, setShowShare] = useState(false);
@@ -177,9 +178,20 @@ export const QuizCard: React.FC<QuizCardProps> = ({ quiz, onClick, onDelete, onT
         {/* Actions — separated, no overlap */}
         {showActions && (
           <div
-            className="pt-2 border-t border-slate-100 dark:border-slate-700 grid grid-cols-4 gap-1"
+            className="pt-2 border-t border-slate-100 dark:border-slate-700 grid grid-cols-5 gap-1"
             onClick={e => e.stopPropagation()}
           >
+            {/* Stats */}
+            {onStats && (
+              <button
+                onClick={onStats}
+                className="flex flex-col items-center gap-1 py-2 rounded-xl text-xs font-medium text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-700 transition-colors"
+              >
+                <TrendingUp className="h-4 w-4" />
+                <span>{lang === 'vi' ? 'Thống kê' : 'Stats'}</span>
+              </button>
+            )}
+
             {/* Edit */}
             <button
               onClick={handleEdit}
