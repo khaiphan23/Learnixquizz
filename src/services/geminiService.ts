@@ -151,183 +151,132 @@ export async function generateQuestionsFromContent(
     throw new Error('Nội dung trống — vui lòng nhập hoặc trích xuất nội dung trước');
   }
 
-  const prompt = `🎯 BẠN LÀ PARSER/CONVERTER - KHÔNG PHẢI GENERATOR
+  // Split content into chunks if too large (max ~8000 chars per request)
+  const MAX_CHUNK_SIZE = 8000;
+  let allQuestions: any[] = [];
 
-NHIỆM VỤ: Sao chép 100% câu hỏi từ file vào hệ thống quiz, giữ nguyên nội dung gốc.
+  const processChunk = async (chunkContent: string, isRetry = false): Promise<any[]> => {
+    let prompt;
+    
+    if (isRetry) {
+      // Simplified prompt for retry
+      prompt = `Parse quiz questions from this content. Return ONLY valid JSON array.
 
-NỘI DUNG ĐẦU VÀO:
-${content}
+Content: ${chunkContent}
 
-═══════════════════════════════════════════════════════════
-📋 QUY TẮC TUYỆT ĐỐI - PHẢI TUÂN THỦ
-═══════════════════════════════════════════════════════════
+Find questions with format:
+- Numbered: "1. A. ... B. ... C. ... D. ..."
+- True/False: "True ____ False ____"
 
-1. GIỮ NGUYÊN CÂU HỎI GỐC (ƯU TIÊN TUYỆT ĐỐI)
-   ✓ Sao chép câu hỏi từ file 1-to-1, KHÔNG thay đổi nội dung
-   ✓ KHÔNG được viết lại, diễn giải lại, hay tạo mới câu hỏi
-   ✓ KHÔNG được thay đổi dạng câu hỏi (trắc nghiệm → tự luận hay ngược lại)
+For each question return:
+{
+  "type": "multiple-choice" | "true-false",
+  "text": "question text",
+  "options": ["A","B","C","D"] or ["True","False"],
+  "correctAnswerIndex": 0-3 (find markers: → [→text←] ____ checkmarks),
+  "explanation": ""
+}
 
-2. MAPPING VỀ 3 DẠNG HỆ THỐNG (chỉ khi cần thiết)
-   • Trắc nghiệm (A,B,C,D) → type: "multiple-choice", giữ nguyên
-   • Đúng/Sai (True/False) → type: "true-false", giữ nguyên  
-   • Điền khuyết (Cloze) → type: "essay", giữ nguyên chỗ trống ___
+Return ONLY JSON array starting with [ and ending with ]:`;
+    } else {
+      // Main detailed prompt
+      prompt = `TASK: Copy ALL quiz questions from file to JSON. Keep original content exactly.
 
-3. XỬ LÝ 100% CÂU HỎI TRONG FILE
-   ✓ Phải xử lý TẤT CẢ câu hỏi có trong tài liệu
-   ✓ KHÔNG được bỏ sót câu nào
-   ✓ KHÔNG dừng sớm vì bất kỳ lý do gì
+Content:
+${chunkContent}
 
-4. KHÔNG TỰ TẠO THÊM CÂU HỎI
-   ✓ Chỉ tạo thêm câu KHI VÀ CHỈ KHI file không có sẵn câu hỏi nào
-   ✓ Câu tạo thêm phải phù hợp nội dung và thuộc 1 trong 3 dạng trên
+RULES:
+1. Copy questions 1-to-1, do NOT rewrite or create new
+2. Multiple-choice (A,B,C,D) → type: "multiple-choice"
+3. True/False → type: "true-false"
+4. Fill-in-blank (___) → type: "essay"
+5. Process ALL questions, don't skip any
+6. Find correct answers from: → [→word←] ____ ✓ [x] "Answer: B"
 
-5. NHẬN DIỆN ĐÁP ÁN ĐÚNG từ file:
-   → Mũi tên "→" sau đáp án (ví dụ: "C. answer→")
-   → Marker màu [→text←] từ PDF OCR
-   → Gạch chân "____" sau True/False
-   → Checkmark ✓, ✔, [v], [x] cạnh đáp án
-   → Text "Answer: B" hoặc "Đáp án: C"
-   → In đậm, màu sắc, highlight khác biệt
+OUTPUT FORMAT - Return ONLY valid JSON array:
+[{"type":"multiple-choice","text":"...","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":""}]`;
+    }
 
-6. KHÔNG DÙNG KIẾN THỨC BẢN THÂN
-   ✗ KHÔNG dùng kiến thức để quyết định đáp án đúng
-   ✗ KHÔNG tự ý sửa lỗi trong câu hỏi gốc
-   ✗ KHÔNG thêm giải thích ngoài nội dung file
-
-═══════════════════════════════════════════════════════════
-📤 ĐỊNH DẠNG ĐẦU RA (JSON Array)
-═══════════════════════════════════════════════════════════
-
-[
-  {
-    "type": "multiple-choice" | "true-false" | "essay",
-    "text": "SAO CHÉP NGUYÊN VĂN câu hỏi từ file",
-    "options": ["A", "B", "C", "D"] hoặc ["True", "False"] hoặc ["Đúng", "Sai"],
-    "correctAnswerIndex": 0-3 (dựa TRÊN MARKER trong file, KHÔNG dùng kiến thức),
-    "explanation": "Giải thích có trong file (nếu có), hoặc để trống"
-  }
-]
-
-⚠️ QUAN TRỌNG: Nếu KHÔNG tìm thấy marker rõ ràng → đặt correctAnswerIndex: 0 và explanation: "Vui lòng kiểm tra lại đáp án"
-
-═══════════════════════════════════════════════════════════
-OUTPUT - Chỉ trả về JSON array hợp lệ, bắt đầu bằng [ và kết thúc bằng ]:`;
-
-  console.log('[AI Debug] Prompt length:', prompt.length, 'Content preview:', content.substring(0, 200));
-
-  console.log('[AI Debug] Sending prompt to Gemini...');
-
-  try {
-    const text = await callGemini(prompt);
-    console.log('[AI Debug] Raw response length:', text.length);
-    console.log('[AI Debug] Raw response preview:', text.substring(0, 800));
-
-    // Try multiple parsing strategies
-    let parsed: any = null;
-    let parseErrors: string[] = [];
-
-    // Strategy 1: Direct JSON parse after removing markdown
-    let clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
     try {
-      parsed = JSON.parse(clean);
-      console.log('[AI Debug] Strategy 1 success - direct parse');
-    } catch (e: any) {
-      parseErrors.push('Direct parse: ' + e.message);
-    }
-
-    // Strategy 2: Extract JSON array from text
-    if (!parsed) {
+      const text = await callGemini(prompt);
+      console.log(`[AI Debug] Response length: ${text.length}, isRetry: ${isRetry}`);
+      
+      // Try to parse JSON
+      let clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+      
+      // Find JSON array
       const match = clean.match(/\[[\s\S]*\]/);
-      if (match) {
-        try {
-          parsed = JSON.parse(match[0]);
-          console.log('[AI Debug] Strategy 2 success - array extraction');
-        } catch (e: any) {
-          parseErrors.push('Array extraction: ' + e.message);
-        }
+      if (match) clean = match[0];
+      
+      const parsed = JSON.parse(clean);
+      if (Array.isArray(parsed)) return parsed;
+      throw new Error('Not an array');
+    } catch (e: any) {
+      console.error(`[AI Debug] Parse failed${isRetry ? ' (retry)' : ''}:`, e.message);
+      if (!isRetry) {
+        console.log('[AI Debug] Retrying with simplified prompt...');
+        return processChunk(chunkContent, true);
       }
+      throw e;
     }
+  };
 
-    // Strategy 3: Find objects between brackets
-    if (!parsed) {
-      const match = clean.match(/\{[\s\S]*?\}/g);
-      if (match && match.length > 0) {
-        try {
-          const wrapped = '[' + match.join(',') + ']';
-          parsed = JSON.parse(wrapped);
-          console.log('[AI Debug] Strategy 3 success - object wrapping');
-        } catch (e: any) {
-          parseErrors.push('Object wrapping: ' + e.message);
-        }
-      }
+  // Process content in chunks if too large
+  if (content.length > MAX_CHUNK_SIZE) {
+    const chunks = content.match(new RegExp(`.{1,${MAX_CHUNK_SIZE}}`, 'g')) || [content];
+    console.log(`[AI Debug] Splitting content into ${chunks.length} chunks`);
+    
+    for (let i = 0; i < chunks.length; i++) {
+      console.log(`[AI Debug] Processing chunk ${i + 1}/${chunks.length}`);
+      const chunkQuestions = await processChunk(chunks[i]);
+      allQuestions = [...allQuestions, ...chunkQuestions];
     }
-
-    // Strategy 4: Manual line-by-line parsing for simple objects
-    if (!parsed) {
-      const lines = clean.split('\n').filter(l => l.trim());
-      const objects: any[] = [];
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-          try {
-            objects.push(JSON.parse(trimmed));
-          } catch {}
-        }
-      }
-      if (objects.length > 0) {
-        parsed = objects;
-        console.log('[AI Debug] Strategy 4 success - line parsing');
-      }
-    }
-
-    if (!parsed || !Array.isArray(parsed)) {
-      console.error('[AI Debug] All parse strategies failed:', parseErrors);
-      console.error('[AI Debug] Final clean text:', clean.substring(0, 1000));
-      throw new Error('Không thể phân tích câu trả lời từ AI. Định dạng không hợp lệ.');
-    }
-
-    console.log(`[AI Debug] Successfully parsed ${parsed.length} items`);
-
-    // Validate and filter questions
-    const validQuestions = parsed.filter((q: any, idx: number) => {
-      if (!q || typeof q !== 'object') {
-        console.log(`[AI Debug] Item ${idx} invalid: not an object`);
-        return false;
-      }
-      if (!q.type || !q.text) {
-        console.log(`[AI Debug] Item ${idx} invalid: missing type or text`, q);
-        return false;
-      }
-      if (q.type === 'multiple-choice') {
-        const valid = Array.isArray(q.options) && q.options.length === 4 &&
-               typeof q.correctAnswerIndex === 'number' &&
-               q.correctAnswerIndex >= 0 && q.correctAnswerIndex <= 3;
-        if (!valid) console.log(`[AI Debug] MC question ${idx} invalid:`, q.options, q.correctAnswerIndex);
-        return valid;
-      }
-      if (q.type === 'true-false') {
-        const valid = Array.isArray(q.options) && q.options.length === 2 &&
-               typeof q.correctAnswerIndex === 'number' &&
-               q.correctAnswerIndex >= 0 && q.correctAnswerIndex <= 1;
-        return valid;
-      }
-      if (q.type === 'essay') {
-        return q.sampleAnswer && typeof q.sampleAnswer === 'string';
-      }
-      return false;
-    });
-
-    console.log(`[AI Debug] Valid questions: ${validQuestions.length}/${parsed.length}`);
-
-    if (validQuestions.length === 0) {
-      throw new Error('AI không trích xuất được câu hỏi hợp lệ nào. Vui lòng kiểm tra nội dung file.');
-    }
-
-    return validQuestions;
-  } catch (error: any) {
-    console.error('[AI Debug] Error:', error.message);
-    throw new Error(`Lỗi tạo câu hỏi: ${error.message}`);
+  } else {
+    allQuestions = await processChunk(content);
   }
+
+  console.log(`[AI Debug] Total questions extracted: ${allQuestions.length}`);
+
+  // Validate all questions
+  const parsed = allQuestions;
+
+  // Validate and filter questions
+  const validQuestions = parsed.filter((q: any, idx: number) => {
+    if (!q || typeof q !== 'object') {
+      console.log(`[AI Debug] Item ${idx} invalid: not an object`);
+      return false;
+    }
+    if (!q.type || !q.text) {
+      console.log(`[AI Debug] Item ${idx} invalid: missing type or text`, q);
+      return false;
+    }
+    if (q.type === 'multiple-choice') {
+      const valid = Array.isArray(q.options) && q.options.length === 4 &&
+             typeof q.correctAnswerIndex === 'number' &&
+             q.correctAnswerIndex >= 0 && q.correctAnswerIndex <= 3;
+      if (!valid) console.log(`[AI Debug] MC question ${idx} invalid:`, q.options, q.correctAnswerIndex);
+      return valid;
+    }
+    if (q.type === 'true-false') {
+      const valid = Array.isArray(q.options) && q.options.length === 2 &&
+             typeof q.correctAnswerIndex === 'number' &&
+             q.correctAnswerIndex >= 0 && q.correctAnswerIndex <= 1;
+      return valid;
+    }
+    if (q.type === 'essay') {
+      // Essay questions don't need sampleAnswer for parsing from file
+      return true;
+    }
+    return false;
+  });
+
+  console.log(`[AI Debug] Valid questions: ${validQuestions.length}/${parsed.length}`);
+
+  if (validQuestions.length === 0) {
+    throw new Error('AI không trích xuất được câu hỏi hợp lệ nào. Vui lòng kiểm tra nội dung file.');
+  }
+
+  return validQuestions;
 }
 
 export async function gradeEssayAI(
