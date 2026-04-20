@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { Question, EssayGrade } from '../types';
 
 const GEMINI_API_KEY =
