@@ -184,12 +184,17 @@ FOR EACH QUESTION FOUND:
 }
 
 ⚠️ FOR EXPLANATION FIELD:
-- If the file has explanation text after the arrow (e.g., "D. them→ themselves means..."), copy that text
+- If the file has explanation text after the arrow, copy that text
 - If the file has explanation in parentheses or separate line, copy that
-- If NO explanation in file, use empty string "" or brief note like "Option D is marked correct"
-- DO NOT write "marked with →" as the explanation
+- If NO explanation in file, use: "Correct answer as indicated in source file"
+- DO NOT write "marked with" or "→" in the explanation
 
-⚠️ REMEMBER: If you cannot find any marker (arrow, checkmark, underscores, etc.), then you MUST guess based on which option looks different in formatting. DO NOT use your own subject knowledge.
+⚠️ CRITICAL - WHEN YOU CANNOT FIND CLEAR MARKER:
+- If NO clear marker (arrow, checkmark, color difference, bold, underline) is found
+- DO NOT use your subject knowledge to guess
+- Set correctAnswerIndex to 0 (first option) as default
+- Write in explanation: "Please verify correct answer - no clear marker found in file"
+- Let the user manually select the correct answer later
 
 OUTPUT - Return ONLY valid JSON array starting with [ and ending with ]:`;
 
