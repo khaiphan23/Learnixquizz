@@ -150,77 +150,96 @@ export async function generateQuestionsFromContent(
     throw new Error('Nội dung trống — vui lòng nhập hoặc trích xuất nội dung trước');
   }
 
-  const prompt = `You are an expert quiz parser and generator. Analyze the following content and extract/generate quiz questions from it.
+  const prompt = `You are an expert quiz parser. Extract ALL quiz questions from the following educational content.
 
-CONTENT:
+INPUT CONTENT:
 ${content}
 
-TASK:
-1. Analyze the content thoroughly to identify ALL quiz questions present.
-2. Automatically detect the question types:
-   - Multiple-choice: Questions with options A, B, C, D (or numbered options)
-   - True/False: Questions with "Đúng/Sai" or "True/False" answers
-   - Essay: Open-ended questions with sample/model answers
-3. For each question, identify the CORRECT ANSWER by looking for:
-   - Visual formatting (bold text, different color markers, asterisks)
-   - Text indicators ("Đáp án đúng là", "Correct answer", "Answer:")
-   - Underlined or highlighted text
-   - Check marks or correct indicators
-4. Extract ALL questions found - do not limit the number.
-5. Determine appropriate difficulty based on content complexity.
+EXTRACTION RULES:
+1. Look for numbered questions (1., 2., 3., etc.) or lettered questions
+2. Identify question types:
+   - MULTIPLE-CHOICE: Has options A, B, C, D (or a, b, c, d). Extract all 4 options.
+   - TRUE-FALSE: Contains "True/False" or "Đúng/Sai" or asks to identify T/F
+   - ESSAY: Open-ended questions requiring paragraph answers
 
-RETURN FORMAT:
-Return ONLY a valid JSON array with all detected questions:
+3. CRITICAL - Find the CORRECT ANSWER:
+   - Look for answer markers AFTER the question: "True ____", "False _____", "A.", "B.", "C.", "D."
+   - Check for checkmarks (✓, ✔, [x], [X]) next to options
+   - Look for "Answer: X" or "Đáp án: X" near the question
+   - Look for bold/italic formatting on correct option
+   - Example: "1. What is...? A. X B. Y C. Z D. W Answer: B"
+   - Example: "True _____ False _____" (mark which one is checked)
+
+4. For each question found, create an object with:
+   - "text": the question text (clean, without option letters)
+   - "type": "multiple-choice", "true-false", or "essay"
+   - "options": array of strings ["A", "B", "C", "D"] or ["True", "False"] or ["Đúng", "Sai"]
+   - "correctAnswerIndex": 0, 1, 2, or 3 (0=A/True/Đúng, 1=B/False/Sai, etc.)
+   - "explanation": brief explanation (1-2 sentences why this is correct)
+
+5. For ESSAY questions:
+   - "sampleAnswer": provide a comprehensive model answer based on the content
+
+OUTPUT FORMAT:
+Return a JSON array. Example structure:
 [
-  {
-    "type": "multiple-choice",
-    "text": "question text",
-    "options": ["A", "B", "C", "D"],
-    "correctAnswerIndex": 0,
-    "explanation": "why this is correct"
-  },
-  {
-    "type": "true-false",
-    "text": "statement",
-    "options": ["Đúng", "Sai"],
-    "correctAnswerIndex": 0,
-    "explanation": "explanation"
-  },
-  {
-    "type": "essay",
-    "text": "question",
-    "sampleAnswer": "comprehensive answer"
-  }
+  {"type": "multiple-choice", "text": "What is...?", "options": ["A", "B", "C", "D"], "correctAnswerIndex": 1, "explanation": "B is correct because..."},
+  {"type": "true-false", "text": "Statement...", "options": ["True", "False"], "correctAnswerIndex": 0, "explanation": "True because..."}
 ]
 
-IMPORTANT:
-- Return ONLY valid JSON, no markdown, no extra text
-- Include ALL questions found in the content
-- Detect correct answers from formatting cues (bold, color, markers)
-- Use ${lang} language for output`;
+CRITICAL RULES:
+1. Return ONLY a valid JSON array - no markdown code blocks, no explanations before or after
+2. The response must start with [ and end with ]
+3. Every question object must have ALL required fields
+4. For multiple-choice: options array must have exactly 4 items (A, B, C, D), correctAnswerIndex must be 0-3
+5. For true-false: options must be ["Đúng", "Sai"] for Vietnamese or ["True", "False"] for English, correctAnswerIndex 0 or 1
+6. For essay: sampleAnswer must be a complete model answer, not empty
+7. Use ${lang} language for output`;
+
+  console.log('[AI Debug] Sending prompt to Gemini...');
 
   try {
     const text = await callGemini(prompt);
-    const clean = text.replace(/```json|```/g, '').trim();
+    console.log('[AI Debug] Raw response:', text.substring(0, 500) + '...');
+
+    // Remove markdown code blocks
+    let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+    // Find JSON array
+    const match = clean.match(/\[[\s\S]*\]/);
+    if (match) {
+      clean = match[0];
+    }
+
+    console.log('[AI Debug] Cleaned JSON:', clean.substring(0, 500) + '...');
 
     try {
       const parsed = JSON.parse(clean);
-      if (Array.isArray(parsed)) return parsed;
-    } catch {
-      // fall through to regex extraction
-    }
-
-    const match = clean.match(/\[[\s\S]*\]/);
-    if (match) {
-      try {
-        return JSON.parse(match[0]);
-      } catch (e) {
-        console.error('JSON parse error in match:', e);
+      if (Array.isArray(parsed)) {
+        console.log(`[AI Debug] Successfully parsed ${parsed.length} questions`);
+        // Validate each question
+        const validQuestions = parsed.filter((q: any) => {
+          if (!q.type || !q.text) return false;
+          if (q.type === 'multiple-choice' || q.type === 'true-false') {
+            return Array.isArray(q.options) && q.options.length >= 2 &&
+                   typeof q.correctAnswerIndex === 'number';
+          }
+          if (q.type === 'essay') {
+            return q.sampleAnswer && q.sampleAnswer.trim().length > 0;
+          }
+          return false;
+        });
+        console.log(`[AI Debug] Valid questions: ${validQuestions.length}/${parsed.length}`);
+        return validQuestions;
       }
+    } catch (e) {
+      console.error('[AI Debug] JSON parse error:', e);
+      console.error('[AI Debug] Failed to parse:', clean.substring(0, 1000));
     }
 
-    throw new Error('Không parse được dữ liệu từ AI — thử lại');
+    throw new Error('AI trả về dữ liệu không đúng định dạng. Vui lòng thử lại.');
   } catch (error: any) {
+    console.error('[AI Debug] Error:', error);
     throw new Error(`Lỗi tạo câu hỏi: ${error.message}`);
   }
 }
