@@ -155,54 +155,74 @@ export async function generateQuestionsFromContent(
   const MAX_CHUNK_SIZE = 8000;
   let allQuestions: any[] = [];
 
-  const processChunk = async (chunkContent: string, isRetry = false): Promise<any[]> => {
+  // Escape special characters for JSON safety
+  const escapeForJson = (str: string): string => {
+    return str
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
+  };
+
+  // Try to repair malformed JSON from AI
+  const repairJson = (str: string): string => {
+    // Remove control characters
+    str = str.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+    // Fix trailing commas
+    str = str.replace(/,\s*([}\]])/g, '$1');
+    // Fix missing quotes around property names
+    str = str.replace(/(\{|,\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+    return str;
+  };
+
+  const processChunk = async (chunkContent: string, isRetry = false, attempt = 0): Promise<any[]> => {
+    const safeContent = escapeForJson(chunkContent);
     let prompt;
     
-    if (isRetry) {
-      // Simplified prompt for retry
+    if (attempt >= 2) {
+      // Last resort - extremely simple prompt
+      prompt = `Extract quiz questions. Return JSON array only.
+
+Text: ${safeContent.substring(0, 4000)}
+
+Format: [{"type":"multiple-choice","text":"Q","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":""}]
+
+JSON:`;
+    } else if (isRetry) {
       prompt = `Parse quiz questions from this content. Return ONLY valid JSON array.
 
-Content: ${chunkContent}
+Content: ${safeContent}
 
-Find questions with format:
-- Numbered: "1. A. ... B. ... C. ... D. ..."
-- True/False: "True ____ False ____"
+Find numbered questions (1., 2., etc.) with options A,B,C,D.
 
-For each question return:
-{
-  "type": "multiple-choice" | "true-false",
-  "text": "question text",
-  "options": ["A","B","C","D"] or ["True","False"],
-  "correctAnswerIndex": 0-3 (find markers: → [→text←] ____ checkmarks),
-  "explanation": ""
-}
+Return format:
+[{"type":"multiple-choice","text":"question text","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":""}]
 
-Return ONLY JSON array starting with [ and ending with ]:`;
+IMPORTANT: Ensure valid JSON - no trailing commas, all quotes closed.`;
     } else {
-      // Main detailed prompt
-      prompt = `TASK: Copy ALL quiz questions from file to JSON. Keep original content exactly.
+      prompt = `TASK: Copy ALL quiz questions from file to JSON.
 
 Content:
-${chunkContent}
+${safeContent}
 
 RULES:
-1. Copy questions 1-to-1, do NOT rewrite or create new
-2. Multiple-choice (A,B,C,D) → type: "multiple-choice"
+1. Copy questions 1-to-1, do NOT rewrite
+2. Multiple-choice → type: "multiple-choice"
 3. True/False → type: "true-false"
-4. Fill-in-blank (___) → type: "essay"
-5. Process ALL questions, don't skip any
-6. Find correct answers from: → [→word←] ____ ✓ [x] "Answer: B"
+4. Find correct answers from markers: → [→word←] ____
 
-OUTPUT FORMAT - Return ONLY valid JSON array:
+OUTPUT - Valid JSON array only:
 [{"type":"multiple-choice","text":"...","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":""}]`;
     }
 
     try {
       const text = await callGemini(prompt);
-      console.log(`[AI Debug] Response length: ${text.length}, isRetry: ${isRetry}`);
+      console.log(`[AI Debug] Response length: ${text.length}, attempt: ${attempt}, isRetry: ${isRetry}`);
       
-      // Try to parse JSON
+      // Clean and repair JSON
       let clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+      clean = repairJson(clean);
       
       // Find JSON array
       const match = clean.match(/\[[\s\S]*\]/);
@@ -212,13 +232,64 @@ OUTPUT FORMAT - Return ONLY valid JSON array:
       if (Array.isArray(parsed)) return parsed;
       throw new Error('Not an array');
     } catch (e: any) {
-      console.error(`[AI Debug] Parse failed${isRetry ? ' (retry)' : ''}:`, e.message);
-      if (!isRetry) {
-        console.log('[AI Debug] Retrying with simplified prompt...');
-        return processChunk(chunkContent, true);
+      console.error(`[AI Debug] Parse failed (attempt ${attempt}):`, e.message);
+      
+      if (attempt < 2) {
+        console.log(`[AI Debug] Retrying with simpler prompt (attempt ${attempt + 1})...`);
+        return processChunk(chunkContent, true, attempt + 1);
       }
-      throw e;
+      
+      // Last resort: try to extract individual questions
+      console.log('[AI Debug] Trying emergency extraction...');
+      return extractQuestionsManually(chunkContent);
     }
+  };
+
+  // Emergency manual extraction if AI completely fails
+  const extractQuestionsManually = (text: string): any[] => {
+    const questions: any[] = [];
+    const lines = text.split('\n');
+    let currentQuestion: any = null;
+    let optionCount = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      
+      // Match numbered question (1. 2. etc.)
+      const qMatch = trimmed.match(/^(\d+)[.\)]\s*(.+)/);
+      if (qMatch && !trimmed.match(/^[A-D][.\)]/)) {
+        if (currentQuestion && currentQuestion.options.length >= 2) {
+          questions.push(currentQuestion);
+        }
+        currentQuestion = {
+          type: 'multiple-choice',
+          text: qMatch[2].replace(/\s*[A-D][.\)]\s*.*/g, '').trim(),
+          options: [],
+          correctAnswerIndex: 0,
+          explanation: ''
+        };
+        optionCount = 0;
+      }
+      
+      // Match option A. B. C. D.
+      const optMatch = trimmed.match(/^([A-D])[.\)]\s*(.+)/);
+      if (optMatch && currentQuestion) {
+        currentQuestion.options.push(optMatch[2].trim());
+        // Check for markers in option
+        if (optMatch[2].includes('→') || optMatch[2].includes('[→')) {
+          currentQuestion.correctAnswerIndex = optionCount;
+        }
+        optionCount++;
+      }
+    }
+    
+    // Add last question
+    if (currentQuestion && currentQuestion.options.length >= 2) {
+      questions.push(currentQuestion);
+    }
+    
+    console.log(`[AI Debug] Emergency extraction found ${questions.length} questions`);
+    return questions;
   };
 
   // Process content in chunks if too large
