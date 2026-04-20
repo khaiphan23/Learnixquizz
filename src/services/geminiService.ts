@@ -151,59 +151,67 @@ export async function generateQuestionsFromContent(
     throw new Error('Nội dung trống — vui lòng nhập hoặc trích xuất nội dung trước');
   }
 
-  const prompt = `You are a quiz parser. Your ONLY job is to copy questions from the file and identify which answer is marked as correct BY LOOKING AT THE FILE FORMATTING ONLY. DO NOT use your own knowledge.
+  const prompt = `🎯 BẠN LÀ PARSER/CONVERTER - KHÔNG PHẢI GENERATOR
 
-INPUT CONTENT:
+NHIỆM VỤ: Sao chép 100% câu hỏi từ file vào hệ thống quiz, giữ nguyên nội dung gốc.
+
+NỘI DUNG ĐẦU VÀO:
 ${content}
 
-⚠️ CRITICAL INSTRUCTIONS - READ CAREFULLY:
-1. You are a COPIER, not a thinker. DO NOT use your own knowledge to determine correct answers.
-2. The correct answer is ALREADY MARKED in the file using visual indicators.
-3. Your job is to DETECT these markers, not to decide what is correct.
+═══════════════════════════════════════════════════════════
+📋 QUY TẮC TUYỆT ĐỐI - PHẢI TUÂN THỦ
+═══════════════════════════════════════════════════════════
 
-HOW TO IDENTIFY CORRECT ANSWERS (look for these markers ONLY):
-- "→" arrow AFTER an option (e.g., "C. organise→" means C is correct)
-- "[→text←]" marker wrapping the correct answer (detected from RED/BLUE color in PDF)
-- "____" underscores AFTER "True" or "False" (more underscores = marked as correct)
-- Checkmarks: ✓, ✔, [v], [x], [X] next to an option
-- Text like "Answer: B" or "Đáp án: C"
-- Options with different formatting (bold, color, highlighting)
+1. GIỮ NGUYÊN CÂU HỎI GỐC (ƯU TIÊN TUYỆT ĐỐI)
+   ✓ Sao chép câu hỏi từ file 1-to-1, KHÔNG thay đổi nội dung
+   ✓ KHÔNG được viết lại, diễn giải lại, hay tạo mới câu hỏi
+   ✓ KHÔNG được thay đổi dạng câu hỏi (trắc nghiệm → tự luận hay ngược lại)
 
-SPECIAL OCR MARKER:
-- When you see "[→word←]" in the content, it means that "word" was detected as having RED/BLUE color in the original PDF
-- This is the correct answer! Extract "word" and set correctAnswerIndex accordingly
-- Example: "[→agency←]" means "agency" is the correct answer → find which option (A/B/C/D) contains "agency"
+2. MAPPING VỀ 3 DẠNG HỆ THỐNG (chỉ khi cần thiết)
+   • Trắc nghiệm (A,B,C,D) → type: "multiple-choice", giữ nguyên
+   • Đúng/Sai (True/False) → type: "true-false", giữ nguyên  
+   • Điền khuyết (Cloze) → type: "essay", giữ nguyên chỗ trống ___
 
-EXAMPLES - FOLLOW THESE EXACTLY:
-File shows: "1. A. cat B. dog→ C. bird D. fish" → correctAnswerIndex: 1 (B has arrow)
-File shows: "2. A. red B. blue C. green→ D. yellow" → correctAnswerIndex: 2 (C has arrow)
-File shows: "2. A. [→agency←] B. ambition C. financial D. atmosphere" → correctAnswerIndex: 0 (A has [→ ←] marker)
-File shows: "True ____ False_____" with True having more marks → correctAnswerIndex: 0
-File shows: "True False ____" with False having marks → correctAnswerIndex: 1
+3. XỬ LÝ 100% CÂU HỎI TRONG FILE
+   ✓ Phải xử lý TẤT CẢ câu hỏi có trong tài liệu
+   ✓ KHÔNG được bỏ sót câu nào
+   ✓ KHÔNG dừng sớm vì bất kỳ lý do gì
 
-FOR EACH QUESTION FOUND:
-{
-  "type": "multiple-choice" or "true-false",
-  "text": "the question text",
-  "options": ["A", "B", "C", "D"] for multiple choice, or ["True", "False"] for T/F,
-  "correctAnswerIndex": 0, 1, 2, or 3 (ONLY based on markers in the file, NOT your knowledge),
-  "explanation": "copy explanation from file if available (text after → or in parentheses), otherwise leave empty or brief note"
-}
+4. KHÔNG TỰ TẠO THÊM CÂU HỎI
+   ✓ Chỉ tạo thêm câu KHI VÀ CHỈ KHI file không có sẵn câu hỏi nào
+   ✓ Câu tạo thêm phải phù hợp nội dung và thuộc 1 trong 3 dạng trên
 
-⚠️ FOR EXPLANATION FIELD:
-- If the file has explanation text after the arrow, copy that text
-- If the file has explanation in parentheses or separate line, copy that
-- If NO explanation in file, use: "Correct answer as indicated in source file"
-- DO NOT write "marked with" or "→" in the explanation
+5. NHẬN DIỆN ĐÁP ÁN ĐÚNG từ file:
+   → Mũi tên "→" sau đáp án (ví dụ: "C. answer→")
+   → Marker màu [→text←] từ PDF OCR
+   → Gạch chân "____" sau True/False
+   → Checkmark ✓, ✔, [v], [x] cạnh đáp án
+   → Text "Answer: B" hoặc "Đáp án: C"
+   → In đậm, màu sắc, highlight khác biệt
 
-⚠️ CRITICAL - WHEN YOU CANNOT FIND CLEAR MARKER:
-- If NO clear marker (arrow, checkmark, color difference, bold, underline) is found
-- DO NOT use your subject knowledge to guess
-- Set correctAnswerIndex to 0 (first option) as default
-- Write in explanation: "Please verify correct answer - no clear marker found in file"
-- Let the user manually select the correct answer later
+6. KHÔNG DÙNG KIẾN THỨC BẢN THÂN
+   ✗ KHÔNG dùng kiến thức để quyết định đáp án đúng
+   ✗ KHÔNG tự ý sửa lỗi trong câu hỏi gốc
+   ✗ KHÔNG thêm giải thích ngoài nội dung file
 
-OUTPUT - Return ONLY valid JSON array starting with [ and ending with ]:`;
+═══════════════════════════════════════════════════════════
+📤 ĐỊNH DẠNG ĐẦU RA (JSON Array)
+═══════════════════════════════════════════════════════════
+
+[
+  {
+    "type": "multiple-choice" | "true-false" | "essay",
+    "text": "SAO CHÉP NGUYÊN VĂN câu hỏi từ file",
+    "options": ["A", "B", "C", "D"] hoặc ["True", "False"] hoặc ["Đúng", "Sai"],
+    "correctAnswerIndex": 0-3 (dựa TRÊN MARKER trong file, KHÔNG dùng kiến thức),
+    "explanation": "Giải thích có trong file (nếu có), hoặc để trống"
+  }
+]
+
+⚠️ QUAN TRỌNG: Nếu KHÔNG tìm thấy marker rõ ràng → đặt correctAnswerIndex: 0 và explanation: "Vui lòng kiểm tra lại đáp án"
+
+═══════════════════════════════════════════════════════════
+OUTPUT - Chỉ trả về JSON array hợp lệ, bắt đầu bằng [ và kết thúc bằng ]:`;
 
   console.log('[AI Debug] Prompt length:', prompt.length, 'Content preview:', content.substring(0, 200));
 
