@@ -151,43 +151,41 @@ export async function generateQuestionsFromContent(
     throw new Error('Nội dung trống — vui lòng nhập hoặc trích xuất nội dung trước');
   }
 
-  const prompt = `You are an expert quiz parser. Extract ALL quiz questions from the following educational content and identify correct answers.
+  const prompt = `You are a quiz parser. Your ONLY job is to copy questions from the file and identify which answer is marked as correct BY LOOKING AT THE FILE FORMATTING ONLY. DO NOT use your own knowledge.
 
 INPUT CONTENT:
 ${content}
 
-EXTRACTION RULES:
-1. Find ALL numbered questions (1., 2., 3., etc.) or lettered questions
-2. Identify question types:
-   - MULTIPLE-CHOICE: Has options A, B, C, D with text after each letter
-   - TRUE-FALSE: Has "True/False" or "Đúng/Sai" or "T/F" options
-   - ESSAY: Open-ended questions
+⚠️ CRITICAL INSTRUCTIONS - READ CAREFULLY:
+1. You are a COPIER, not a thinker. DO NOT use your own knowledge to determine correct answers.
+2. The correct answer is ALREADY MARKED in the file using visual indicators.
+3. Your job is to DETECT these markers, not to decide what is correct.
 
-3. CRITICAL - IDENTIFY CORRECT ANSWERS using these markers:
-   - ARROW "→" pointing to correct option (e.g., "D. them→ themselves" means D is correct)
-   - Text after "→" shows the correct answer text
-   - Underscores "____" after True/False indicate the answer (e.g., "True ____" means True is correct)
-   - Checkmarks: ✓, ✔, [x], [X] next to options
-   - "Answer: X" or "Đáp án: X" 
-   - Bold text or different formatting
+HOW TO IDENTIFY CORRECT ANSWERS (look for these markers ONLY):
+- "→" arrow AFTER an option (e.g., "C. organise→" means C is correct)
+- "____" underscores AFTER "True" or "False" (more underscores = marked as correct)
+- Checkmarks: ✓, ✔, [v], [x], [X] next to an option
+- Text like "Answer: B" or "Đáp án: C"
+- Options with different formatting (bold, color, highlighting)
 
-4. EXAMPLES from this content:
-   - "D. them→ themselves" → correctAnswerIndex: 3 (D is correct)
-   - "C. for → from" → correctAnswerIndex: 2 (C is correct, "from" replaces "for")
-   - "True ____ False_____" → If True has more underscores or marking, True is correct
-   - "28. The York Museum... True ____" → True is the answer
+EXAMPLES - FOLLOW THESE EXACTLY:
+File shows: "1. A. cat B. dog→ C. bird D. fish" → correctAnswerIndex: 1 (B has arrow)
+File shows: "2. A. red B. blue C. green→ D. yellow" → correctAnswerIndex: 2 (C has arrow)
+File shows: "True ____ False_____" with True having more marks → correctAnswerIndex: 0
+File shows: "True False ____" with False having marks → correctAnswerIndex: 1
 
-5. For each question create:
-   {
-     "type": "multiple-choice" | "true-false" | "essay",
-     "text": "question text without option letters",
-     "options": ["A", "B", "C", "D"] or ["True", "False"] or ["Đúng", "Sai"],
-     "correctAnswerIndex": number (0=A/True, 1=B/False, 2=C, 3=D),
-     "explanation": "why this answer is correct based on the content"
-   }
+FOR EACH QUESTION FOUND:
+{
+  "type": "multiple-choice" or "true-false",
+  "text": "the question text",
+  "options": ["A", "B", "C", "D"] for multiple choice, or ["True", "False"] for T/F,
+  "correctAnswerIndex": 0, 1, 2, or 3 (ONLY based on markers in the file, NOT your knowledge),
+  "explanation": "copy the reason if provided in file, or brief note about which option was marked correct"
+}
 
-OUTPUT - Return ONLY valid JSON array:
-[{"type":"multiple-choice","text":"...","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":"..."}]`;
+⚠️ REMEMBER: If you cannot find any marker (arrow, checkmark, underscores, etc.), then you MUST guess based on which option looks different in formatting. DO NOT use your own subject knowledge.
+
+OUTPUT - Return ONLY valid JSON array starting with [ and ending with ]:`;
 
   console.log('[AI Debug] Prompt length:', prompt.length, 'Content preview:', content.substring(0, 200));
 
