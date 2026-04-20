@@ -151,96 +151,157 @@ export async function generateQuestionsFromContent(
     throw new Error('Nội dung trống — vui lòng nhập hoặc trích xuất nội dung trước');
   }
 
-  const prompt = `You are an expert quiz parser. Extract ALL quiz questions from the following educational content.
+  const prompt = `You are an expert quiz parser. Extract ALL quiz questions from the following educational content and identify correct answers.
 
 INPUT CONTENT:
 ${content}
 
 EXTRACTION RULES:
-1. Look for numbered questions (1., 2., 3., etc.) or lettered questions
+1. Find ALL numbered questions (1., 2., 3., etc.) or lettered questions
 2. Identify question types:
-   - MULTIPLE-CHOICE: Has options A, B, C, D (or a, b, c, d). Extract all 4 options.
-   - TRUE-FALSE: Contains "True/False" or "Đúng/Sai" or asks to identify T/F
-   - ESSAY: Open-ended questions requiring paragraph answers
+   - MULTIPLE-CHOICE: Has options A, B, C, D with text after each letter
+   - TRUE-FALSE: Has "True/False" or "Đúng/Sai" or "T/F" options
+   - ESSAY: Open-ended questions
 
-3. CRITICAL - Find the CORRECT ANSWER:
-   - Look for answer markers AFTER the question: "True ____", "False _____", "A.", "B.", "C.", "D."
-   - Check for checkmarks (✓, ✔, [x], [X]) next to options
-   - Look for "Answer: X" or "Đáp án: X" near the question
-   - Look for bold/italic formatting on correct option
-   - Example: "1. What is...? A. X B. Y C. Z D. W Answer: B"
-   - Example: "True _____ False _____" (mark which one is checked)
+3. CRITICAL - IDENTIFY CORRECT ANSWERS using these markers:
+   - ARROW "→" pointing to correct option (e.g., "D. them→ themselves" means D is correct)
+   - Text after "→" shows the correct answer text
+   - Underscores "____" after True/False indicate the answer (e.g., "True ____" means True is correct)
+   - Checkmarks: ✓, ✔, [x], [X] next to options
+   - "Answer: X" or "Đáp án: X" 
+   - Bold text or different formatting
 
-4. For each question found, create an object with:
-   - "text": the question text (clean, without option letters)
-   - "type": "multiple-choice", "true-false", or "essay"
-   - "options": array of strings ["A", "B", "C", "D"] or ["True", "False"] or ["Đúng", "Sai"]
-   - "correctAnswerIndex": 0, 1, 2, or 3 (0=A/True/Đúng, 1=B/False/Sai, etc.)
-   - "explanation": brief explanation (1-2 sentences why this is correct)
+4. EXAMPLES from this content:
+   - "D. them→ themselves" → correctAnswerIndex: 3 (D is correct)
+   - "C. for → from" → correctAnswerIndex: 2 (C is correct, "from" replaces "for")
+   - "True ____ False_____" → If True has more underscores or marking, True is correct
+   - "28. The York Museum... True ____" → True is the answer
 
-5. For ESSAY questions:
-   - "sampleAnswer": provide a comprehensive model answer based on the content
+5. For each question create:
+   {
+     "type": "multiple-choice" | "true-false" | "essay",
+     "text": "question text without option letters",
+     "options": ["A", "B", "C", "D"] or ["True", "False"] or ["Đúng", "Sai"],
+     "correctAnswerIndex": number (0=A/True, 1=B/False, 2=C, 3=D),
+     "explanation": "why this answer is correct based on the content"
+   }
 
-OUTPUT FORMAT:
-Return a JSON array. Example structure:
-[
-  {"type": "multiple-choice", "text": "What is...?", "options": ["A", "B", "C", "D"], "correctAnswerIndex": 1, "explanation": "B is correct because..."},
-  {"type": "true-false", "text": "Statement...", "options": ["True", "False"], "correctAnswerIndex": 0, "explanation": "True because..."}
-]
+OUTPUT - Return ONLY valid JSON array:
+[{"type":"multiple-choice","text":"...","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":"..."}]`;
 
-CRITICAL RULES:
-1. Return ONLY a valid JSON array - no markdown code blocks, no explanations before or after
-2. The response must start with [ and end with ]
-3. Every question object must have ALL required fields
-4. For multiple-choice: options array must have exactly 4 items (A, B, C, D), correctAnswerIndex must be 0-3
-5. For true-false: options must be ["Đúng", "Sai"] for Vietnamese or ["True", "False"] for English, correctAnswerIndex 0 or 1
-6. For essay: sampleAnswer must be a complete model answer, not empty
-7. Use ${lang} language for output`;
+  console.log('[AI Debug] Prompt length:', prompt.length, 'Content preview:', content.substring(0, 200));
 
   console.log('[AI Debug] Sending prompt to Gemini...');
 
   try {
     const text = await callGemini(prompt);
-    console.log('[AI Debug] Raw response:', text.substring(0, 500) + '...');
+    console.log('[AI Debug] Raw response length:', text.length);
+    console.log('[AI Debug] Raw response preview:', text.substring(0, 800));
 
-    // Remove markdown code blocks
-    let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    // Try multiple parsing strategies
+    let parsed: any = null;
+    let parseErrors: string[] = [];
 
-    // Find JSON array
-    const match = clean.match(/\[[\s\S]*\]/);
-    if (match) {
-      clean = match[0];
-    }
-
-    console.log('[AI Debug] Cleaned JSON:', clean.substring(0, 500) + '...');
-
+    // Strategy 1: Direct JSON parse after removing markdown
+    let clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
     try {
-      const parsed = JSON.parse(clean);
-      if (Array.isArray(parsed)) {
-        console.log(`[AI Debug] Successfully parsed ${parsed.length} questions`);
-        // Validate each question
-        const validQuestions = parsed.filter((q: any) => {
-          if (!q.type || !q.text) return false;
-          if (q.type === 'multiple-choice' || q.type === 'true-false') {
-            return Array.isArray(q.options) && q.options.length >= 2 &&
-                   typeof q.correctAnswerIndex === 'number';
-          }
-          if (q.type === 'essay') {
-            return q.sampleAnswer && q.sampleAnswer.trim().length > 0;
-          }
-          return false;
-        });
-        console.log(`[AI Debug] Valid questions: ${validQuestions.length}/${parsed.length}`);
-        return validQuestions;
-      }
-    } catch (e) {
-      console.error('[AI Debug] JSON parse error:', e);
-      console.error('[AI Debug] Failed to parse:', clean.substring(0, 1000));
+      parsed = JSON.parse(clean);
+      console.log('[AI Debug] Strategy 1 success - direct parse');
+    } catch (e: any) {
+      parseErrors.push('Direct parse: ' + e.message);
     }
 
-    throw new Error('AI trả về dữ liệu không đúng định dạng. Vui lòng thử lại.');
+    // Strategy 2: Extract JSON array from text
+    if (!parsed) {
+      const match = clean.match(/\[[\s\S]*\]/);
+      if (match) {
+        try {
+          parsed = JSON.parse(match[0]);
+          console.log('[AI Debug] Strategy 2 success - array extraction');
+        } catch (e: any) {
+          parseErrors.push('Array extraction: ' + e.message);
+        }
+      }
+    }
+
+    // Strategy 3: Find objects between brackets
+    if (!parsed) {
+      const match = clean.match(/\{[\s\S]*?\}/g);
+      if (match && match.length > 0) {
+        try {
+          const wrapped = '[' + match.join(',') + ']';
+          parsed = JSON.parse(wrapped);
+          console.log('[AI Debug] Strategy 3 success - object wrapping');
+        } catch (e: any) {
+          parseErrors.push('Object wrapping: ' + e.message);
+        }
+      }
+    }
+
+    // Strategy 4: Manual line-by-line parsing for simple objects
+    if (!parsed) {
+      const lines = clean.split('\n').filter(l => l.trim());
+      const objects: any[] = [];
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+          try {
+            objects.push(JSON.parse(trimmed));
+          } catch {}
+        }
+      }
+      if (objects.length > 0) {
+        parsed = objects;
+        console.log('[AI Debug] Strategy 4 success - line parsing');
+      }
+    }
+
+    if (!parsed || !Array.isArray(parsed)) {
+      console.error('[AI Debug] All parse strategies failed:', parseErrors);
+      console.error('[AI Debug] Final clean text:', clean.substring(0, 1000));
+      throw new Error('Không thể phân tích câu trả lời từ AI. Định dạng không hợp lệ.');
+    }
+
+    console.log(`[AI Debug] Successfully parsed ${parsed.length} items`);
+
+    // Validate and filter questions
+    const validQuestions = parsed.filter((q: any, idx: number) => {
+      if (!q || typeof q !== 'object') {
+        console.log(`[AI Debug] Item ${idx} invalid: not an object`);
+        return false;
+      }
+      if (!q.type || !q.text) {
+        console.log(`[AI Debug] Item ${idx} invalid: missing type or text`, q);
+        return false;
+      }
+      if (q.type === 'multiple-choice') {
+        const valid = Array.isArray(q.options) && q.options.length === 4 &&
+               typeof q.correctAnswerIndex === 'number' &&
+               q.correctAnswerIndex >= 0 && q.correctAnswerIndex <= 3;
+        if (!valid) console.log(`[AI Debug] MC question ${idx} invalid:`, q.options, q.correctAnswerIndex);
+        return valid;
+      }
+      if (q.type === 'true-false') {
+        const valid = Array.isArray(q.options) && q.options.length === 2 &&
+               typeof q.correctAnswerIndex === 'number' &&
+               q.correctAnswerIndex >= 0 && q.correctAnswerIndex <= 1;
+        return valid;
+      }
+      if (q.type === 'essay') {
+        return q.sampleAnswer && typeof q.sampleAnswer === 'string';
+      }
+      return false;
+    });
+
+    console.log(`[AI Debug] Valid questions: ${validQuestions.length}/${parsed.length}`);
+
+    if (validQuestions.length === 0) {
+      throw new Error('AI không trích xuất được câu hỏi hợp lệ nào. Vui lòng kiểm tra nội dung file.');
+    }
+
+    return validQuestions;
   } catch (error: any) {
-    console.error('[AI Debug] Error:', error);
+    console.error('[AI Debug] Error:', error.message);
     throw new Error(`Lỗi tạo câu hỏi: ${error.message}`);
   }
 }
