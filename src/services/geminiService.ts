@@ -180,8 +180,14 @@ FOR EACH QUESTION FOUND:
   "text": "the question text",
   "options": ["A", "B", "C", "D"] for multiple choice, or ["True", "False"] for T/F,
   "correctAnswerIndex": 0, 1, 2, or 3 (ONLY based on markers in the file, NOT your knowledge),
-  "explanation": "copy the reason if provided in file, or brief note about which option was marked correct"
+  "explanation": "copy explanation from file if available (text after → or in parentheses), otherwise leave empty or brief note"
 }
+
+⚠️ FOR EXPLANATION FIELD:
+- If the file has explanation text after the arrow (e.g., "D. them→ themselves means..."), copy that text
+- If the file has explanation in parentheses or separate line, copy that
+- If NO explanation in file, use empty string "" or brief note like "Option D is marked correct"
+- DO NOT write "marked with →" as the explanation
 
 ⚠️ REMEMBER: If you cannot find any marker (arrow, checkmark, underscores, etc.), then you MUST guess based on which option looks different in formatting. DO NOT use your own subject knowledge.
 
