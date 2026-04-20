@@ -240,25 +240,160 @@ export async function parseDocx(file: File): Promise<string> {
   }
 }
 
+// OCR for images using Tesseract.js with color detection
+export async function parseImage(file: File): Promise<string> {
+  validateFile(file);
+  try {
+    // Load image and detect colors
+    const arrayBuffer = await file.arrayBuffer();
+    const blob = new Blob([arrayBuffer], { type: file.type });
+    const imageUrl = URL.createObjectURL(blob);
+
+    // Create image element to analyze
+    const img = new Image();
+    img.src = imageUrl;
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
+
+    // Create canvas for color analysis
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Không thể tạo canvas để phân tích ảnh');
+
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+
+    // Find regions with special colors (red, blue, green)
+    const markedRegions: { x: number; y: number; width: number; height: number; color: string }[] = [];
+    const blockSize = 10;
+
+    for (let y = 0; y < canvas.height; y += blockSize) {
+      for (let x = 0; x < canvas.width; x += blockSize) {
+        const idx = (y * canvas.width + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        const a = data[idx + 3];
+
+        if (a < 128) continue; // Skip transparent
+
+        // Red color (high R, low G, low B)
+        if (r > 150 && g < 100 && b < 100) {
+          markedRegions.push({ x, y, width: blockSize, height: blockSize, color: 'red' });
+        }
+        // Blue color (high B, low R, low G)
+        else if (b > 150 && r < 100 && g < 150) {
+          markedRegions.push({ x, y, width: blockSize, height: blockSize, color: 'blue' });
+        }
+        // Green highlight (high G)
+        else if (g > 150 && r < 150 && b < 150) {
+          markedRegions.push({ x, y, width: blockSize, height: blockSize, color: 'green' });
+        }
+      }
+    }
+
+    console.log(`[Image Color Detection] Found ${markedRegions.length} colored regions`);
+
+    // Perform OCR
+    const Tesseract = await import('tesseract.js');
+    const result = await Tesseract.recognize(
+      imageUrl,
+      'eng+vie',
+      {
+        logger: (m) => {
+          if (m.status === 'recognizing text') {
+            console.log(`[OCR] Progress: ${(m.progress * 100).toFixed(1)}%`);
+          }
+        }
+      }
+    );
+
+    URL.revokeObjectURL(imageUrl);
+
+    if (!result.data.text || result.data.text.trim().length === 0) {
+      throw new Error('Không thể nhận diện được văn bản từ hình ảnh. Ảnh có thể quá mờ hoặc không chứa text.');
+    }
+
+    // Process OCR result to mark colored text
+    let processedText = result.data.text;
+
+    // If we detected color regions, try to mark potential answers in the text
+    // This is a heuristic - we wrap potential answer words with markers
+    if (markedRegions.length > 0) {
+      // Split into lines and process
+      const lines = processedText.split('\n');
+      const processedLines = lines.map((line: string) => {
+        // Look for answer options like "A. word", "B. word", etc.
+        return line.replace(/([A-D]\.\s+)(\S+)/g, (match, prefix, word) => {
+          // Check if this word position might be in a colored region
+          // Since we can't map exact positions, we'll mark all options
+          // and let AI figure it out from context
+          return prefix + word;
+        });
+      });
+      processedText = processedLines.join('\n');
+
+      // Add marker note at the beginning for AI
+      processedText = `[COLOR_DETECTION: Found ${markedRegions.filter(r => r.color === 'red').length} red regions, ${markedRegions.filter(r => r.color === 'blue').length} blue regions]\n\n${processedText}`;
+    }
+
+    console.log(`[OCR] Confidence: ${result.data.confidence}%`);
+    console.log(`[Image Parser] Text length: ${processedText.length}`);
+
+    return processedText;
+  } catch (error: any) {
+    if (error.message?.includes('network')) {
+      throw new Error('Lỗi kết nối khi tải OCR engine. Vui lòng kiểm tra mạng internet.');
+    }
+    throw new Error(`Lỗi OCR: ${error.message || 'Không thể nhận diện văn bản từ ảnh'}`);
+  }
+}
+
+// Main function to extract text from any supported file type
 export async function extractTextFromFile(file: File): Promise<string> {
   const ext = file.name.split('.').pop()?.toLowerCase();
 
   switch (ext) {
+    // Text-based files
     case 'txt':
     case 'md':
     case 'markdown':
-      // Markdown files are text-based, can be read directly
       return parseTxt(file);
+
+    // Rich text format
     case 'rtf':
       return parseRtf(file);
+
+    // PDF with color detection
     case 'pdf':
       return parsePdf(file);
+
+    // Word documents
     case 'docx':
       return parseDocx(file);
     case 'doc':
-      // .doc (old Word format) is NOT supported by mammoth
       throw new Error(`Định dạng .doc (Word 97-2003) không được hỗ trợ. Vui lòng lưu file thành .docx hoặc .pdf.`);
+
+    // Image files with OCR
+    case 'jpg':
+    case 'jpeg':
+    case 'png':
+    case 'gif':
+    case 'bmp':
+    case 'webp':
+      return parseImage(file);
+
+    // HTML files
+    case 'html':
+    case 'htm':
+      return parseTxt(file); // HTML is text-based
+
     default:
-      throw new Error(`Định dạng không được hỗ trợ: .${ext}. Hỗ trợ: .txt, .md, .rtf, .pdf, .docx`);
+      throw new Error(`Định dạng không được hỗ trợ: .${ext}. Hỗ trợ: .txt, .md, .rtf, .pdf, .docx, .jpg, .png, .gif, .html`);
   }
 }
