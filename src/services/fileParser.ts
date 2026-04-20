@@ -1,4 +1,4 @@
-// File Parser Service - Extract text from .txt, .pdf, .docx files
+// File Parser Service - Extract text from .txt, .pdf, .docx files with color detection
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -6,6 +6,13 @@ function validateFile(file: File): void {
   if (file.size > MAX_FILE_SIZE) {
     throw new Error(`File quá lớn (tối đa 10MB). File hiện tại: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
   }
+}
+
+// Interface for text with color information
+export interface TextItem {
+  text: string;
+  isMarked?: boolean; // true if text has special color (red, blue, highlight)
+  color?: string;
 }
 
 export async function parseTxt(file: File): Promise<string> {
@@ -77,6 +84,86 @@ async function initPdfjs() {
   pdfjsInitialized = true;
 }
 
+// Phân tích màu sắc của canvas để tìm text có màu đặc biệt
+function analyzeCanvasColors(canvas: HTMLCanvasElement, textItems: any[]): string[] {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return textItems.map(item => item.str);
+
+  const width = canvas.width;
+  const height = canvas.height;
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+
+  // Hàm kiểm tra xem pixel có phải màu đỏ (đáp án đúng thường màu đỏ)
+  function isRedPixel(r: number, g: number, b: number, a: number): boolean {
+    if (a < 128) return false; // Transparent
+    // Màu đỏ: R cao, G thấp, B thấp
+    return r > 150 && g < 100 && b < 100;
+  }
+
+  // Hàm kiểm tra màu xanh dương
+  function isBluePixel(r: number, g: number, b: number, a: number): boolean {
+    if (a < 128) return false;
+    return b > 150 && r < 100 && g < 150;
+  }
+
+  // Hàm kiểm tra màu xanh lá (highlight)
+  function isGreenPixel(r: number, g: number, b: number, a: number): boolean {
+    if (a < 128) return false;
+    return g > 150 && r < 150 && b < 150;
+  }
+
+  // Tạo map của các vùng có màu đặc biệt
+  const markedRegions: { x: number; y: number; width: number; height: number; color: string }[] = [];
+
+  // Scan canvas để tìm vùng có màu đặc biệt
+  const blockSize = 10; // Kích thước block để scan
+  for (let y = 0; y < height; y += blockSize) {
+    for (let x = 0; x < width; x += blockSize) {
+      const idx = (y * width + x) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const a = data[idx + 3];
+
+      if (isRedPixel(r, g, b, a)) {
+        markedRegions.push({ x, y, width: blockSize, height: blockSize, color: 'red' });
+      } else if (isBluePixel(r, g, b, a)) {
+        markedRegions.push({ x, y, width: blockSize, height: blockSize, color: 'blue' });
+      } else if (isGreenPixel(r, g, b, a)) {
+        markedRegions.push({ x, y, width: blockSize, height: blockSize, color: 'green' });
+      }
+    }
+  }
+
+  // Kiểm tra từng text item xem có nằm trong vùng marked không
+  return textItems.map((item: any) => {
+    if (!item.transform) return item.str;
+
+    const [scaleX, skewY, skewX, scaleY, translateX, translateY] = item.transform;
+    const textX = translateX;
+    const textY = translateY;
+    const textWidth = item.width || 50;
+    const textHeight = item.height || 20;
+
+    // Kiểm tra xem text có nằm trong vùng marked không
+    const isMarked = markedRegions.some(region => {
+      return (
+        textX < region.x + region.width &&
+        textX + textWidth > region.x &&
+        textY < region.y + region.height &&
+        textY + textHeight > region.y
+      );
+    });
+
+    // Nếu text được đánh dấu, thêm marker
+    if (isMarked) {
+      return `[→${item.str}←]`; // Marker đặc biệt cho AI nhận biết
+    }
+    return item.str;
+  });
+}
+
 export async function parsePdf(file: File): Promise<string> {
   validateFile(file);
 
@@ -94,9 +181,34 @@ export async function parsePdf(file: File): Promise<string> {
 
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
+
+    // Lấy text content
     const textContent = await page.getTextContent();
-    const pageText = textContent.items.map((item) => ('str' in item ? item.str : '')).join(' ');
-    textParts.push(pageText);
+
+    // Render page thành canvas để phân tích màu sắc
+    const viewport = page.getViewport({ scale: 2.0 }); // Scale cao để nhận diện tốt hơn
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+
+    if (ctx) {
+      // Render PDF page lên canvas
+      await page.render({
+        canvasContext: ctx,
+        viewport: viewport,
+        canvas: canvas,
+      } as any).promise;
+
+      // Phân tích màu sắc và đánh dấu text có màu đặc biệt
+      const markedTexts = analyzeCanvasColors(canvas, textContent.items);
+      const pageText = markedTexts.join(' ');
+      textParts.push(pageText);
+    } else {
+      // Fallback nếu không render được canvas
+      const pageText = textContent.items.map((item) => ('str' in item ? item.str : '')).join(' ');
+      textParts.push(pageText);
+    }
   }
 
   return textParts.join('\n\n');

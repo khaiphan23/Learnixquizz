@@ -163,14 +163,21 @@ ${content}
 
 HOW TO IDENTIFY CORRECT ANSWERS (look for these markers ONLY):
 - "→" arrow AFTER an option (e.g., "C. organise→" means C is correct)
+- "[→text←]" marker wrapping the correct answer (detected from RED/BLUE color in PDF)
 - "____" underscores AFTER "True" or "False" (more underscores = marked as correct)
 - Checkmarks: ✓, ✔, [v], [x], [X] next to an option
 - Text like "Answer: B" or "Đáp án: C"
 - Options with different formatting (bold, color, highlighting)
 
+SPECIAL OCR MARKER:
+- When you see "[→word←]" in the content, it means that "word" was detected as having RED/BLUE color in the original PDF
+- This is the correct answer! Extract "word" and set correctAnswerIndex accordingly
+- Example: "[→agency←]" means "agency" is the correct answer → find which option (A/B/C/D) contains "agency"
+
 EXAMPLES - FOLLOW THESE EXACTLY:
 File shows: "1. A. cat B. dog→ C. bird D. fish" → correctAnswerIndex: 1 (B has arrow)
 File shows: "2. A. red B. blue C. green→ D. yellow" → correctAnswerIndex: 2 (C has arrow)
+File shows: "2. A. [→agency←] B. ambition C. financial D. atmosphere" → correctAnswerIndex: 0 (A has [→ ←] marker)
 File shows: "True ____ False_____" with True having more marks → correctAnswerIndex: 0
 File shows: "True False ____" with False having marks → correctAnswerIndex: 1
 
