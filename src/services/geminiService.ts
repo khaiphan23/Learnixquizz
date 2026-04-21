@@ -201,18 +201,29 @@ Return format:
 
 IMPORTANT: Ensure valid JSON - no trailing commas, all quotes closed.`;
     } else {
-      prompt = `TASK: Copy ALL quiz questions from file to JSON.
+      prompt = `TASK: Extract quiz questions from file to JSON. KEEP ORIGINAL ORDER.
 
 Content:
 ${safeContent}
 
-RULES:
-1. Copy questions 1-to-1, do NOT rewrite
-2. Multiple-choice → type: "multiple-choice"
-3. True/False → type: "true-false"
-4. Find correct answers from markers: → [→word←] ____
+⚠️ CRITICAL RULES:
+1. KEEP QUESTION ORDER - Process questions in exact order they appear (1, 2, 3...)
+2. SKIP HEADERS - Do NOT include section titles like "I. PRONUNCIATION", "II. VOCABULARY", "TEST 1"
+3. ONLY REAL QUESTIONS - Look for numbered questions (1., 2., 3.) with options A,B,C,D or True/False
+4. ANSWER FROM FILE ONLY - Use markers in file: → [→word←] ____ "Answer: B" - NEVER use your own knowledge
+5. If no marker found → set correctAnswerIndex to 0
 
-OUTPUT - Valid JSON array only:
+VALID QUESTION SIGNS:
+- Starts with number: "1. ", "2. "
+- Has options: "A. ", "B. ", "C. ", "D. "
+- Or True/False options
+
+SKIP THESE (NOT QUESTIONS):
+- "TEST 1", "I. PRONUNCIATION", "II. VOCABULARY"
+- "Choose the word..." without number
+- "Read the text..." without specific question number
+
+OUTPUT - Valid JSON array in original order:
 [{"type":"multiple-choice","text":"...","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":""}]`;
     }
 
@@ -245,39 +256,68 @@ OUTPUT - Valid JSON array only:
     }
   };
 
-  // Emergency manual extraction if AI completely fails
+  // Emergency manual extraction if AI completely fails - keeps original order
   const extractQuestionsManually = (text: string): any[] => {
     const questions: any[] = [];
     const lines = text.split('\n');
     let currentQuestion: any = null;
+    let currentQuestionNum = 0;
     let optionCount = 0;
+    
+    // Header patterns to skip
+    const headerPatterns = [
+      /^(test\s+\d+|keys?|pronunciation|vocabulary|grammar|reading|writing|error\s+correction|matching|open\s+cloze|iii?\.|iv\.|v\.)/i,
+      /^(choose\s+the\s+(word|best))/i,
+      /^(read\s+the\s+(text|passage|following))/i,
+      /^(a\.\s*choose|b\.\s*choose)/i
+    ];
 
     for (const line of lines) {
       const trimmed = line.trim();
+      if (!trimmed || trimmed.length < 3) continue;
       
-      // Match numbered question (1. 2. etc.)
+      // Skip headers/section titles
+      if (headerPatterns.some(p => p.test(trimmed))) {
+        console.log(`[Manual Extract] Skipping header: ${trimmed.substring(0, 50)}`);
+        continue;
+      }
+      
+      // Match numbered question (1. 2. 3. etc.) - must be at start
       const qMatch = trimmed.match(/^(\d+)[.\)]\s*(.+)/);
-      if (qMatch && !trimmed.match(/^[A-D][.\)]/)) {
+      if (qMatch) {
+        const questionNum = parseInt(qMatch[1]);
+        const questionText = qMatch[2].trim();
+        
+        // Save previous question if valid
         if (currentQuestion && currentQuestion.options.length >= 2) {
           questions.push(currentQuestion);
         }
+        
+        // Start new question
+        currentQuestionNum = questionNum;
         currentQuestion = {
           type: 'multiple-choice',
-          text: qMatch[2].replace(/\s*[A-D][.\)]\s*.*/g, '').trim(),
+          text: questionText.replace(/\s*[A-D][.\)]\s*.*/g, '').trim(),
           options: [],
           correctAnswerIndex: 0,
-          explanation: ''
+          explanation: '',
+          _questionNum: questionNum // Keep track for ordering
         };
         optionCount = 0;
+        continue;
       }
       
-      // Match option A. B. C. D.
+      // Match option A. B. C. D. - only if we have a current question
       const optMatch = trimmed.match(/^([A-D])[.\)]\s*(.+)/);
       if (optMatch && currentQuestion) {
-        currentQuestion.options.push(optMatch[2].trim());
-        // Check for markers in option
-        if (optMatch[2].includes('→') || optMatch[2].includes('[→')) {
+        const optionText = optMatch[2].trim();
+        currentQuestion.options.push(optionText);
+        
+        // Check for answer markers in option
+        if (optionText.includes('→') || optionText.includes('[→') || 
+            optionText.includes('____') || /\b(answer|đáp án)\s*[:=]\s*[A-D]\b/i.test(trimmed)) {
           currentQuestion.correctAnswerIndex = optionCount;
+          console.log(`[Manual Extract] Q${currentQuestionNum}: Found marker at option ${optMatch[1]}`);
         }
         optionCount++;
       }
@@ -288,22 +328,62 @@ OUTPUT - Valid JSON array only:
       questions.push(currentQuestion);
     }
     
-    console.log(`[AI Debug] Emergency extraction found ${questions.length} questions`);
+    // Sort by question number to ensure order
+    questions.sort((a, b) => (a._questionNum || 0) - (b._questionNum || 0));
+    
+    // Remove internal tracking field
+    questions.forEach(q => delete q._questionNum);
+    
+    console.log(`[AI Debug] Manual extraction: Found ${questions.length} questions in order`);
     return questions;
   };
 
-  // Process content in chunks if too large
-  if (content.length > MAX_CHUNK_SIZE) {
-    const chunks = content.match(new RegExp(`.{1,${MAX_CHUNK_SIZE}}`, 'g')) || [content];
-    console.log(`[AI Debug] Splitting content into ${chunks.length} chunks`);
+  // Smart chunking - split by question numbers to avoid cutting questions
+  const splitByQuestions = (text: string, maxSize: number): string[] => {
+    const chunks: string[] = [];
+    let currentChunk = '';
     
-    for (let i = 0; i < chunks.length; i++) {
-      console.log(`[AI Debug] Processing chunk ${i + 1}/${chunks.length}`);
-      const chunkQuestions = await processChunk(chunks[i]);
-      allQuestions = [...allQuestions, ...chunkQuestions];
+    // Find all question boundaries (lines starting with number)
+    const lines = text.split('\n');
+    let lastQuestionIndex = 0;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // Check if this is a new question (starts with number)
+      if (/^\d+[.\)]/.test(line.trim())) {
+        // If current chunk is getting too big, save it and start new
+        if (currentChunk.length > maxSize && lastQuestionIndex > 0) {
+          chunks.push(currentChunk.trim());
+          // Keep last few lines for context in next chunk
+          const contextLines = lines.slice(Math.max(0, lastQuestionIndex - 3), i);
+          currentChunk = contextLines.join('\n') + '\n';
+        }
+        lastQuestionIndex = i;
+      }
+      currentChunk += line + '\n';
     }
+    
+    // Add remaining content
+    if (currentChunk.trim()) {
+      chunks.push(currentChunk.trim());
+    }
+    
+    return chunks.length > 0 ? chunks : [text];
+  };
+
+  // Process content
+  let chunks: string[];
+  if (content.length > MAX_CHUNK_SIZE) {
+    chunks = splitByQuestions(content, MAX_CHUNK_SIZE);
+    console.log(`[AI Debug] Smart splitting: ${chunks.length} chunks (by questions)`);
   } else {
-    allQuestions = await processChunk(content);
+    chunks = [content];
+  }
+  
+  for (let i = 0; i < chunks.length; i++) {
+    console.log(`[AI Debug] Processing chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
+    const chunkQuestions = await processChunk(chunks[i]);
+    allQuestions = [...allQuestions, ...chunkQuestions];
   }
 
   console.log(`[AI Debug] Total questions extracted: ${allQuestions.length}`);
@@ -347,7 +427,16 @@ OUTPUT - Valid JSON array only:
     throw new Error('AI không trích xuất được câu hỏi hợp lệ nào. Vui lòng kiểm tra nội dung file.');
   }
 
-  return validQuestions;
+  // Sort by question number to maintain original order
+  const sortedQuestions = validQuestions.sort((a: any, b: any) => {
+    // Try to extract question number from text
+    const numA = parseInt(a.text?.match(/^\d+/)?.[0] || '0');
+    const numB = parseInt(b.text?.match(/^\d+/)?.[0] || '0');
+    return numA - numB;
+  });
+
+  console.log(`[AI Debug] Returning ${sortedQuestions.length} questions in original order`);
+  return sortedQuestions;
 }
 
 export async function gradeEssayAI(
