@@ -201,30 +201,32 @@ Return format:
 
 IMPORTANT: Ensure valid JSON - no trailing commas, all quotes closed.`;
     } else {
-      prompt = `TASK: Extract quiz questions from file to JSON. KEEP ORIGINAL ORDER.
+      prompt = `TASK: Extract ALL quiz questions from file to JSON. START FROM QUESTION 1.
 
 Content:
 ${safeContent}
 
-⚠️ CRITICAL RULES:
-1. KEEP QUESTION ORDER - Process questions in exact order they appear (1, 2, 3...)
-2. SKIP HEADERS - Do NOT include section titles like "I. PRONUNCIATION", "II. VOCABULARY", "TEST 1"
-3. ONLY REAL QUESTIONS - Look for numbered questions (1., 2., 3.) with options A,B,C,D or True/False
-4. ANSWER FROM FILE ONLY - Use markers in file: → [→word←] ____ "Answer: B" - NEVER use your own knowledge
-5. If no marker found → set correctAnswerIndex to 0
+⚠️ ABSOLUTE RULES - MUST FOLLOW:
+1. START FROM QUESTION 1 - First question in output MUST be question 1 from file
+2. NO SKIP - Extract EVERY numbered question (1, 2, 3, 4... to the end)
+3. KEEP ORDER - Questions must be in exact order: 1, 2, 3, 4, 5...
+4. COPY EXACT - Do not change question text, options, or wording
+5. ANSWER FROM FILE ONLY - Use markers: → [→text←] ____ "Answer: B"
+6. NEVER use your own knowledge to guess answers
+7. If no marker → set correctAnswerIndex to 0
 
-VALID QUESTION SIGNS:
-- Starts with number: "1. ", "2. "
-- Has options: "A. ", "B. ", "C. ", "D. "
-- Or True/False options
+HOW TO IDENTIFY QUESTIONS:
+- Line starts with number: "1. Question text..."
+- Followed by options: "A. option1 B. option2 C. option3 D. option4"
 
-SKIP THESE (NOT QUESTIONS):
-- "TEST 1", "I. PRONUNCIATION", "II. VOCABULARY"
-- "Choose the word..." without number
-- "Read the text..." without specific question number
+SKIP (NOT questions):
+- Section headers: "TEST 1", "I. PRONUNCIATION", "II. VOCABULARY"
+- Instructions without numbers: "Choose the word...", "Read the text..."
 
-OUTPUT - Valid JSON array in original order:
-[{"type":"multiple-choice","text":"...","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":""}]`;
+OUTPUT FORMAT:
+[{"type":"multiple-choice","text":"1. Original question text...","options":["A. ...","B. ...","C. ...","D. ..."],"correctAnswerIndex":0,"explanation":""}]
+
+REMEMBER: First JSON object MUST be question 1. Count: ${safeContent.match(/^\d+[.\)]/gm)?.length || '?'} questions found.`;
     }
 
     try {

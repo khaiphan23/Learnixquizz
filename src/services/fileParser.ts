@@ -79,9 +79,10 @@ async function initPdfjs() {
   if (pdfjsInitialized) return;
 
   const pdfjsLib = await import('pdfjs-dist');
-  // Dùng legacy build (UMD) - hoạt động tốt trong mọi môi trường
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.6.205/pdf.worker.min.js`;
+  // Disable worker to use main thread - avoids CORS/worker loading issues
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
   pdfjsInitialized = true;
+  return pdfjsLib;
 }
 
 // Phân tích màu sắc của canvas để tìm text có màu đặc biệt

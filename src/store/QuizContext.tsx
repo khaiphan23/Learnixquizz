@@ -98,14 +98,28 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // FIX LỖI 2: addQuiz giờ dùng optimistic update — thêm vào state TRƯỚC khi insert
   // Nếu insert lỗi thì rollback. Không cần chờ DB để UI cập nhật ngay.
   const addQuiz = async (quiz: Quiz) => {
-    if (!user) return;
+    if (!user) throw new Error('Bạn cần đăng nhập để lưu quiz');
+    
+    // Validate quiz data
+    if (!quiz.questions || quiz.questions.length === 0) {
+      throw new Error('Quiz phải có ít nhất 1 câu hỏi');
+    }
+    
     const row = quizToDb(quiz, user.id);
     row.author = user.name;
 
     // Optimistic: thêm vào đầu list ngay lập tức
     setQuizzes(prev => [quiz, ...prev]);
 
-    const { error } = await supabase.from('quizzes').insert(row);
+    // Add timeout to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Kết nối quá chậm - vui lòng thử lại')), 30000)
+    );
+    
+    const insertPromise = supabase.from('quizzes').insert(row);
+    
+    const { error } = await Promise.race([insertPromise, timeoutPromise]) as any;
+    
     if (error) {
       // Rollback nếu insert thất bại
       setQuizzes(prev => prev.filter(q => q.id !== quiz.id));
@@ -114,13 +128,27 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const editQuiz = async (updatedQuiz: Quiz) => {
-    if (!user) return;
+    if (!user) throw new Error('Bạn cần đăng nhập để cập nhật quiz');
+    
+    // Validate quiz data
+    if (!updatedQuiz.questions || updatedQuiz.questions.length === 0) {
+      throw new Error('Quiz phải có ít nhất 1 câu hỏi');
+    }
+    
     const row = quizToDb(updatedQuiz, user.id);
     // Optimistic update
     setQuizzes(prev => prev.map(q => q.id === updatedQuiz.id ? updatedQuiz : q));
     setPublicQuizzes(prev => prev.map(q => q.id === updatedQuiz.id ? updatedQuiz : q));
 
-    const { error } = await supabase.from('quizzes').upsert(row, { onConflict: 'id' });
+    // Add timeout to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Kết nối quá chậm - vui lòng thử lại')), 30000)
+    );
+    
+    const upsertPromise = supabase.from('quizzes').upsert(row, { onConflict: 'id' });
+    
+    const { error } = await Promise.race([upsertPromise, timeoutPromise]) as any;
+    
     if (error) {
       // Không rollback edit vì khó lấy lại state cũ — chỉ log lỗi
       console.error('editQuiz error:', error.message);
