@@ -211,22 +211,28 @@ ${safeContent}
 2. NO SKIP - Extract EVERY numbered question (1, 2, 3, 4... to the end)
 3. KEEP ORDER - Questions must be in exact order: 1, 2, 3, 4, 5...
 4. COPY EXACT - Do not change question text, options, or wording
-5. ANSWER FROM FILE ONLY - Use markers: → [→text←] ____ "Answer: B"
-6. NEVER use your own knowledge to guess answers
-7. If no marker → set correctAnswerIndex to 0
+5. DETECT QUESTION TYPE - Look at format to determine type:
+   - Has A,B,C,D options → "multiple-choice"
+   - True/False options → "true-false"
+   - Fill blanks (___) or open answer → "essay"
+6. ANSWER FROM FILE ONLY - Use markers: → [→text←] ____ "Answer: B"
+7. NEVER use your own knowledge to guess answers
+8. If no marker → set correctAnswerIndex to 0
 
-HOW TO IDENTIFY QUESTIONS:
-- Line starts with number: "1. Question text..."
-- Followed by options: "A. option1 B. option2 C. option3 D. option4"
+QUESTION TYPE DETECTION:
+- "Câu 1. Hoàn thành phương trình... ___ → "essay" (fill blank)
+- "Câu 2. Trình bày ứng dụng..." → "essay" (open answer)
+- "1. What is... A. ... B. ..." → "multiple-choice"
 
 SKIP (NOT questions):
-- Section headers: "TEST 1", "I. PRONUNCIATION", "II. VOCABULARY"
-- Instructions without numbers: "Choose the word...", "Read the text..."
+- "Kiến thức cần nhớ:", "TEST 1", "I. PRONUNCIATION", "Phần tự luận"
+- Headers without question numbers
 
-OUTPUT FORMAT:
-[{"type":"multiple-choice","text":"1. Original question text...","options":["A. ...","B. ...","C. ...","D. ..."],"correctAnswerIndex":0,"explanation":""}]
+OUTPUT FORMAT by type:
+Multiple choice: {"type":"multiple-choice","text":"1. Question","options":["A...","B...","C...","D..."],"correctAnswerIndex":0,"explanation":""}
+Essay: {"type":"essay","text":"1. Question with ___ blanks or open answer","options":[],"correctAnswerIndex":0,"explanation":""}
 
-REMEMBER: First JSON object MUST be question 1. Count: ${safeContent.match(/^\d+[.\)]/gm)?.length || '?'} questions found.`;
+REMEMBER: First JSON object MUST be question 1.`;
     }
 
     try {
@@ -265,17 +271,22 @@ REMEMBER: First JSON object MUST be question 1. Count: ${safeContent.match(/^\d+
     let currentQuestion: any = null;
     let currentQuestionNum = 0;
     let optionCount = 0;
+    let linesAfterQuestion = 0;
     
     // Header patterns to skip
     const headerPatterns = [
       /^(test\s+\d+|keys?|pronunciation|vocabulary|grammar|reading|writing|error\s+correction|matching|open\s+cloze|iii?\.|iv\.|v\.)/i,
       /^(choose\s+the\s+(word|best))/i,
       /^(read\s+the\s+(text|passage|following))/i,
-      /^(a\.\s*choose|b\.\s*choose)/i
+      /^(a\.\s*choose|b\.\s*choose)/i,
+      /^(kiến\s+thức|cần\s+nhớ|kiến\s+thức\s+cần\s+nhớ)/i,
+      /^(phần\s+tự\s+luận|phần\s+trắc\s+nghiệm|bài\s+tự\s+luận)/i,
+      /^(ôn\s+thường\s+xuyên|ôn\s+tập|đề\s+cương)/i,
+      /^(khtn|toán|lý|hóa|sinh|sử|địa|anh\s*văn)/i
     ];
 
-    for (const line of lines) {
-      const trimmed = line.trim();
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
       if (!trimmed || trimmed.length < 3) continue;
       
       // Skip headers/section titles
@@ -284,28 +295,36 @@ REMEMBER: First JSON object MUST be question 1. Count: ${safeContent.match(/^\d+
         continue;
       }
       
-      // Match numbered question (1. 2. 3. etc.) - must be at start
-      const qMatch = trimmed.match(/^(\d+)[.\)]\s*(.+)/);
+      // Match numbered question (1. 2. 3. or Câu 1. Câu 2.) - must be at start
+      const qMatch = trimmed.match(/^(?:Câu\s+)?(\d+)[.\)]\s*(.+)/i);
       if (qMatch) {
         const questionNum = parseInt(qMatch[1]);
         const questionText = qMatch[2].trim();
         
-        // Save previous question if valid
-        if (currentQuestion && currentQuestion.options.length >= 2) {
-          questions.push(currentQuestion);
+        // Save previous question if valid (has options OR is essay type)
+        if (currentQuestion) {
+          if (currentQuestion.options.length >= 2) {
+            // Multiple choice
+            questions.push(currentQuestion);
+          } else if (currentQuestion.options.length === 0 && linesAfterQuestion > 0) {
+            // Essay - no options but has content after
+            currentQuestion.type = 'essay';
+            questions.push(currentQuestion);
+          }
         }
         
         // Start new question
         currentQuestionNum = questionNum;
         currentQuestion = {
-          type: 'multiple-choice',
-          text: questionText.replace(/\s*[A-D][.\)]\s*.*/g, '').trim(),
+          type: 'multiple-choice', // Default, will change to essay if no options found
+          text: trimmed, // Keep full text including number
           options: [],
           correctAnswerIndex: 0,
           explanation: '',
           _questionNum: questionNum // Keep track for ordering
         };
         optionCount = 0;
+        linesAfterQuestion = 0;
         continue;
       }
       
@@ -314,6 +333,7 @@ REMEMBER: First JSON object MUST be question 1. Count: ${safeContent.match(/^\d+
       if (optMatch && currentQuestion) {
         const optionText = optMatch[2].trim();
         currentQuestion.options.push(optionText);
+        linesAfterQuestion++;
         
         // Check for answer markers in option
         if (optionText.includes('→') || optionText.includes('[→') || 
@@ -322,12 +342,21 @@ REMEMBER: First JSON object MUST be question 1. Count: ${safeContent.match(/^\d+
           console.log(`[Manual Extract] Q${currentQuestionNum}: Found marker at option ${optMatch[1]}`);
         }
         optionCount++;
+      } else if (currentQuestion && !optMatch) {
+        // Content after question but not an option - could be continuation
+        linesAfterQuestion++;
       }
     }
     
     // Add last question
-    if (currentQuestion && currentQuestion.options.length >= 2) {
-      questions.push(currentQuestion);
+    if (currentQuestion) {
+      if (currentQuestion.options.length >= 2) {
+        questions.push(currentQuestion);
+      } else if (currentQuestion.options.length === 0) {
+        // Essay type
+        currentQuestion.type = 'essay';
+        questions.push(currentQuestion);
+      }
     }
     
     // Sort by question number to ensure order
@@ -336,7 +365,7 @@ REMEMBER: First JSON object MUST be question 1. Count: ${safeContent.match(/^\d+
     // Remove internal tracking field
     questions.forEach(q => delete q._questionNum);
     
-    console.log(`[AI Debug] Manual extraction: Found ${questions.length} questions in order`);
+    console.log(`[AI Debug] Manual extraction: Found ${questions.length} questions (${questions.filter(q => q.type === 'essay').length} essay, ${questions.filter(q => q.type === 'multiple-choice').length} MC)`);
     return questions;
   };
 

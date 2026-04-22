@@ -76,11 +76,14 @@ export async function parseRtf(file: File): Promise<string> {
 let pdfjsInitialized = false;
 
 async function initPdfjs() {
-  if (pdfjsInitialized) return;
+  if (pdfjsInitialized) {
+    return await import('pdfjs-dist');
+  }
 
   const pdfjsLib = await import('pdfjs-dist');
-  // Disable worker to use main thread - avoids CORS/worker loading issues
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+  // Use fake worker to avoid loading external worker file
+  const pdfWorker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker.default;
   pdfjsInitialized = true;
   return pdfjsLib;
 }
@@ -168,9 +171,8 @@ function analyzeCanvasColors(canvas: HTMLCanvasElement, textItems: any[]): strin
 export async function parsePdf(file: File): Promise<string> {
   validateFile(file);
 
-  // Initialize PDF.js worker (chỉ chạy một lần)
-  await initPdfjs();
-  const pdfjsLib = await import('pdfjs-dist');
+  // Initialize PDF.js
+  const pdfjsLib = await initPdfjs();
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({
