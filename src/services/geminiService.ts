@@ -151,9 +151,14 @@ export async function generateQuestionsFromContent(
     throw new Error('Nội dung trống — vui lòng nhập hoặc trích xuất nội dung trước');
   }
 
-  // Split content into chunks if too large (max ~8000 chars per request)
-  const MAX_CHUNK_SIZE = 8000;
+  // Split content into chunks - smaller chunks for better accuracy
+  const MAX_CHUNK_SIZE = 3000; // Reduced from 8000 to ensure all questions processed
   let allQuestions: any[] = [];
+  
+  // Count expected questions in content
+  const questionMatches = content.match(/^(?:Câu\s+|)\d+[.\)]/gim) || [];
+  const expectedQuestionCount = questionMatches.length;
+  console.log(`[AI Debug] Expected questions in content: ${expectedQuestionCount}`);
 
   // Escape special characters for JSON safety
   const escapeForJson = (str: string): string => {
@@ -232,7 +237,11 @@ OUTPUT FORMAT by type:
 Multiple choice: {"type":"multiple-choice","text":"1. Question","options":["A...","B...","C...","D..."],"correctAnswerIndex":0,"explanation":""}
 Essay: {"type":"essay","text":"1. Question with ___ blanks or open answer","options":[],"correctAnswerIndex":0,"explanation":""}
 
-REMEMBER: First JSON object MUST be question 1.`;
+VERIFICATION:
+- Count all numbered items (1., 2., 3., Câu 1, Câu 2) in the content
+- Your output MUST have the SAME number of questions
+- If you find 30 questions, you MUST return 30 JSON objects
+- Double-check: Did you include the LAST question?`;
     }
 
     try {
