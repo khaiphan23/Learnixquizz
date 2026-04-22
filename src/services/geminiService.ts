@@ -195,53 +195,75 @@ Format: [{"type":"multiple-choice","text":"Q","options":["A","B","C","D"],"corre
 
 JSON:`;
     } else if (isRetry) {
-      prompt = `Parse quiz questions from this content. Return ONLY valid JSON array.
+      prompt = `Trích xuất câu hỏi từ nội dung. Trả về JSON array.
 
-Content: ${safeContent}
+Nội dung: ${safeContent.substring(0, 5000)}
 
-Find numbered questions (1., 2., etc.) with options A,B,C,D.
+Tìm tất cả câu có đánh số (1., 2., Câu 1, Câu 2) và options A,B,C,D.
 
-Return format:
-[{"type":"multiple-choice","text":"question text","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":""}]
+Format:
+[{"type":"multiple-choice","text":"1. Câu hỏi","options":["A...","B...","C...","D..."],"correctAnswerIndex":0,"explanation":""}]
 
-IMPORTANT: Ensure valid JSON - no trailing commas, all quotes closed.`;
+Lưu ý:
+- Giữ nguyên thứ tự
+- Không bỏ sót câu nào
+- JSON hợp lệ, không trailing commas`;
     } else {
-      prompt = `TASK: Extract ALL quiz questions from file to JSON. START FROM QUESTION 1.
+      prompt = `Bạn là hệ thống AI chuyên trích xuất câu hỏi quiz từ tài liệu. Nhiệm vụ: phân tích và chuyển đổi thành JSON, KHÔNG thay đổi nội dung gốc.
 
-Content:
+========================
+YÊU CẦU NGHIÊM NGẶT
+========================
+
+1. GIỮ NGUYÊN NỘI DUNG 100%
+- KHÔNG chỉnh sửa, viết lại, tóm tắt câu hỏi hay đáp án
+- Giữ NGUYÊN VĂN (dấu câu, ký tự, thứ tự)
+- KHÔNG thay đổi thứ tự câu hỏi
+
+2. NHẬN DIỆN TẤT CẢ CÂU HỎI - KHÔNG BỎ SÓT
+Nhận diện câu hỏi dựa trên:
+- Đánh số: 1, 2, 3, ... hoặc Câu 1, Câu 2...
+- Có options A, B, C, D
+- Có dấu hiệu xuống dòng và bullet point
+
+QUY TẮC VỀ SỐ THỨ TỰ:
+- CÓ THỂ có nhiều câu cùng số (do lỗi format)
+- KHÔNG được xóa hoặc gộp câu dù số trùng
+- Giữ đầy đủ TẤT CẢ câu theo thứ tự xuất hiện
+
+3. PHÂN LOẠI CÂU HỎI
+A. "multiple-choice": Có options A, B, C, D
+B. "true-false": Có Đúng/Sai, True/False
+C. "essay": Không có options, yêu cầu trả lời tự do (có ___ hoặc "trình bày")
+
+4. NHẬN DIỆN ĐÁP ÁN (TỪ FILE - KHÔNG ĐOÁN)
+Ưu tiên 1: Có "Đáp án:", "Answer:", "→text←", "____"
+Ưu tiên 2: Có (*), ✔, ✓ trước option
+Ưu tiên 3: Option có format khác (in đậm/nghiêng)
+Nếu không tìm thấy → correctAnswerIndex: 0
+
+5. KHÔNG SUY ĐOÁN
+- KHÔNG tự tạo đáp án
+- KHÔNG dùng kiến thức cá nhân
+
+========================
+NỘI DUNG FILE:
+========================
 ${safeContent}
 
-⚠️ ABSOLUTE RULES - MUST FOLLOW:
-1. START FROM QUESTION 1 - First question in output MUST be question 1 from file
-2. NO SKIP - Extract EVERY numbered question (1, 2, 3, 4... to the end)
-3. KEEP ORDER - Questions must be in exact order: 1, 2, 3, 4, 5...
-4. COPY EXACT - Do not change question text, options, or wording
-5. DETECT QUESTION TYPE - Look at format to determine type:
-   - Has A,B,C,D options → "multiple-choice"
-   - True/False options → "true-false"
-   - Fill blanks (___) or open answer → "essay"
-6. ANSWER FROM FILE ONLY - Use markers: → [→text←] ____ "Answer: B"
-7. NEVER use your own knowledge to guess answers
-8. If no marker → set correctAnswerIndex to 0
+========================
+OUTPUT FORMAT (JSON ARRAY):
+========================
+[
+  {"type":"multiple-choice","text":"1. Câu hỏi","options":["A...","B...","C...","D..."],"correctAnswerIndex":0,"explanation":""},
+  {"type":"essay","text":"Câu 2. Trình bày...","options":[],"correctAnswerIndex":0,"explanation":""}
+]
 
-QUESTION TYPE DETECTION:
-- "Câu 1. Hoàn thành phương trình... ___ → "essay" (fill blank)
-- "Câu 2. Trình bày ứng dụng..." → "essay" (open answer)
-- "1. What is... A. ... B. ..." → "multiple-choice"
-
-SKIP (NOT questions):
-- "Kiến thức cần nhớ:", "TEST 1", "I. PRONUNCIATION", "Phần tự luận"
-- Headers without question numbers
-
-OUTPUT FORMAT by type:
-Multiple choice: {"type":"multiple-choice","text":"1. Question","options":["A...","B...","C...","D..."],"correctAnswerIndex":0,"explanation":""}
-Essay: {"type":"essay","text":"1. Question with ___ blanks or open answer","options":[],"correctAnswerIndex":0,"explanation":""}
-
-VERIFICATION:
-- Count all numbered items (1., 2., 3., Câu 1, Câu 2) in the content
-- Your output MUST have the SAME number of questions
-- If you find 30 questions, you MUST return 30 JSON objects
-- Double-check: Did you include the LAST question?`;
+⚠️ BẮT BUỘC:
+1. Trích xuất TẤT CẢ câu hỏi (đếm và kiểm tra)
+2. Nếu có 30 câu → trả về 30 objects
+3. Giữ nguyên thứ tự xuất hiện trong file
+4. KHÔNG bỏ sót câu cuối cùng`;
     }
 
     try {
