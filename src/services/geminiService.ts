@@ -209,61 +209,96 @@ Lưu ý:
 - Không bỏ sót câu nào
 - JSON hợp lệ, không trailing commas`;
     } else {
-      prompt = `Bạn là hệ thống AI chuyên trích xuất câu hỏi quiz từ tài liệu. Nhiệm vụ: phân tích và chuyển đổi thành JSON, KHÔNG thay đổi nội dung gốc.
+      prompt = `Bạn là hệ thống AI chuyên trích xuất quiz từ tài liệu. Nhiệm vụ: Chuyển đổi sang JSON mà KHÔNG làm mất câu hỏi, thứ tự, nội dung, đáp án.
 
 ========================
-YÊU CẦU NGHIÊM NGẶT
+NGUYÊN TẮC TUYỆT ĐỐI
 ========================
 
-1. GIỮ NGUYÊN NỘI DUNG 100%
-- KHÔNG chỉnh sửa, viết lại, tóm tắt câu hỏi hay đáp án
-- Giữ NGUYÊN VĂN (dấu câu, ký tự, thứ tự)
-- KHÔNG thay đổi thứ tự câu hỏi
+1. KHÔNG THAY ĐỔI NỘI DUNG
+- Giữ nguyên 100% câu hỏi và đáp án
+- Không viết lại, không rút gọn, không sửa lỗi
+- Không thay đổi thứ tự xuất hiện
 
-2. NHẬN DIỆN TẤT CẢ CÂU HỎI - KHÔNG BỎ SÓT
-Nhận diện câu hỏi dựa trên:
-- Đánh số: 1, 2, 3, ... hoặc Câu 1, Câu 2...
-- Có options A, B, C, D
-- Có dấu hiệu xuống dòng và bullet point
+2. KHÔNG MẤT DỮ LIỆU
+- Phải trích xuất TẤT CẢ câu hỏi
+- Không được bỏ sót: câu trùng số, câu sai format, câu trong đoạn văn
 
-QUY TẮC VỀ SỐ THỨ TỰ:
-- CÓ THỂ có nhiều câu cùng số (do lỗi format)
-- KHÔNG được xóa hoặc gộp câu dù số trùng
-- Giữ đầy đủ TẤT CẢ câu theo thứ tự xuất hiện
+3. THỨ TỰ LÀ TUYỆT ĐỐI
+- Giữ đúng thứ tự xuất hiện trong tài liệu
 
-3. PHÂN LOẠI CÂU HỎI
-A. "multiple-choice": Có options A, B, C, D
-B. "true-false": Có Đúng/Sai, True/False
-C. "essay": Không có options, yêu cầu trả lời tự do (có ___ hoặc "trình bày")
+4. XỬ LÝ SỐ THỨ TỰ TRÙNG
+- Nếu nhiều câu có cùng số → vẫn giữ tất cả
+- KHÔNG gộp, KHÔNG xóa, KHÔNG sửa
 
-4. NHẬN DIỆN ĐÁP ÁN (TỪ FILE - KHÔNG ĐOÁN)
-Ưu tiên 1: Có "Đáp án:", "Answer:", "→text←", "____"
-Ưu tiên 2: Có (*), ✔, ✓ trước option
-Ưu tiên 3: Option có format khác (in đậm/nghiêng)
-Nếu không tìm thấy → correctAnswerIndex: 0
+========================
+NHẬN DIỆN CÂU HỎI
+========================
 
-5. KHÔNG SUY ĐOÁN
-- KHÔNG tự tạo đáp án
+Một câu được coi là câu hỏi nếu có:
+- số thứ tự (1, 2, 3... hoặc Câu 1, Câu 2...)
+- đáp án A, B, C, D
+- chỗ trống ______
+- yêu cầu viết lại / biến đổi
+
+BAO GỒM TẤT CẢ DẠNG: trắc nghiệm, đúng/sai, tự luận, điền khuyết, viết lại.
+
+========================
+XỬ LÝ CÂU HỎI THEO NHÓM
+========================
+
+Một đề mục có thể chứa NHIỀU câu hỏi con.
+QUY TẮC: Mỗi dòng có số là 1 câu hỏi độc lập, KHÔNG gộp.
+
+Ví dụ:
+I. PHẦN TỰ LUẬN
+Câu 1. ...
+Câu 2. ...
+Câu 3. ...
+→ phải tách thành 3 câu riêng
+
+========================
+PHÂN LOẠI CÂU HỎI
+========================
+
+"multiple-choice": Có A, B, C, D
+"true-false": Có Đúng/Sai, True/False
+"essay": Tự luận, viết lại, word form, có ___
+
+========================
+NHẬN DIỆN ĐÁP ÁN (QUAN TRỌNG)
+========================
+
+Ưu tiên 1: Có "Đáp án:", "Answer:", "→text←"
+Ưu tiên 2: Có (*), ✓ trước option
+Ưu tiên 3: Option được đánh dấu
+
+QUY TẮC: Nếu không tìm thấy → correctAnswerIndex: 0
+
+========================
+KHÔNG SUY ĐOÁN
+========================
+- KHÔNG tự điền đáp án
 - KHÔNG dùng kiến thức cá nhân
 
 ========================
-NỘI DUNG FILE:
+NỘI DUNG:
 ========================
 ${safeContent}
 
 ========================
-OUTPUT FORMAT (JSON ARRAY):
+OUTPUT (JSON ARRAY):
 ========================
 [
   {"type":"multiple-choice","text":"1. Câu hỏi","options":["A...","B...","C...","D..."],"correctAnswerIndex":0,"explanation":""},
   {"type":"essay","text":"Câu 2. Trình bày...","options":[],"correctAnswerIndex":0,"explanation":""}
 ]
 
-⚠️ BẮT BUỘC:
-1. Trích xuất TẤT CẢ câu hỏi (đếm và kiểm tra)
-2. Nếu có 30 câu → trả về 30 objects
-3. Giữ nguyên thứ tự xuất hiện trong file
-4. KHÔNG bỏ sót câu cuối cùng`;
+⚠️ ĐIỀU KIỆN THÀNH CÔNG:
+- Không mất câu nào
+- Không sai thứ tự
+- Không thay đổi nội dung
+- Không gộp câu`;
     }
 
     try {
