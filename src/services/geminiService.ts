@@ -104,28 +104,59 @@ export async function generateQuizAI(
   topic: string,
   numQuestions: number,
   difficulty: string,
-  language: string
+  language: string,
+  attempt = 0
 ): Promise<Question[]> {
   const lang = language === 'en' ? 'English' : 'Vietnamese';
 
-  const prompt = `Generate ${numQuestions} quiz questions about "${topic}" at ${difficulty} difficulty. Respond in ${lang}.
+  // Simpler prompt on retry
+  const prompt = attempt > 0 
+    ? `Tạo ${numQuestions} câu hỏi trắc nghiệm về "${topic}" (độ khó: ${difficulty}). Trả về JSON array:
+[{"type":"multiple-choice","text":"Câu hỏi","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":""}]`
+    : `Generate ${numQuestions} quiz questions about "${topic}" at ${difficulty} difficulty. Respond in ${lang}.
 Return ONLY a valid JSON array, no markdown, no extra text:
-[{"id":"q1","type":"multiple-choice","text":"question text","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":"why A is correct"}]
+[{"type":"multiple-choice","text":"question text","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":"why A is correct"}]
 Types allowed: multiple-choice (4 options), true-false (options: ["True","False"] or ["Đúng","Sai"]).`;
 
-  const text = await callGemini(prompt);
-  const clean = text.replace(/```json|```/g, '').trim();
-
   try {
-    const parsed = JSON.parse(clean);
-    if (Array.isArray(parsed)) return parsed;
-    throw new Error('Không phải array');
-  } catch {
-    const match = clean.match(/\[[\s\S]*\]/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch (e) { console.error('JSON parse error in match:', e); }
+    const text = await callGemini(prompt);
+    console.log(`[generateQuizAI] Response length: ${text.length}, attempt: ${attempt}`);
+    
+    // Repair JSON
+    let clean = text.replace(/```json\s*|```\s*/gi, '').trim();
+    clean = clean.replace(/[\x00-\x1F\x7F-\x9F]/g, ''); // Remove control chars
+    clean = clean.replace(/,\s*([}\]])/g, '$1'); // Fix trailing commas
+    
+    try {
+      const parsed = JSON.parse(clean);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        console.log(`[generateQuizAI] Success: ${parsed.length} questions`);
+        return parsed;
+      }
+      throw new Error('Empty or invalid array');
+    } catch (parseError) {
+      // Try extract JSON array
+      const match = clean.match(/\[[\s\S]*\]/);
+      if (match) {
+        try {
+          const extracted = JSON.parse(match[0]);
+          if (Array.isArray(extracted) && extracted.length > 0) {
+            console.log(`[generateQuizAI] Extracted ${extracted.length} questions from array`);
+            return extracted;
+          }
+        } catch (e) { console.error('[generateQuizAI] Extract failed:', e); }
+      }
+      throw parseError;
     }
-    throw new Error('Không parse được dữ liệu từ AI — thử lại');
+  } catch (error: any) {
+    console.error(`[generateQuizAI] Error (attempt ${attempt}):`, error.message);
+    
+    if (attempt < 2) {
+      console.log('[generateQuizAI] Retrying with simpler prompt...');
+      return generateQuizAI(topic, numQuestions, difficulty, language, attempt + 1);
+    }
+    
+    throw new Error('Không parse được dữ liệu từ AI — thử lại sau');
   }
 }
 

@@ -135,6 +135,17 @@ export const TakeQuiz: React.FC = () => {
     </div>
   );
 
+  // Kiểm tra quiz.questions hợp lệ
+  if (!quiz.questions || !Array.isArray(quiz.questions) || quiz.questions.length === 0) {
+    return (
+      <div className="max-w-lg mx-auto px-4 py-20 text-center space-y-4">
+        <AlertCircle className="h-12 w-12 text-red-400 mx-auto" />
+        <p className="text-slate-600 dark:text-slate-400">Quiz này không có câu hỏi hợp lệ</p>
+        <Button onClick={() => navigate('/')}>{t.backHome}</Button>
+      </div>
+    );
+  }
+
   const diffLabel: Record<string, string> = { easy: t.easy, medium: t.medium, hard: t.hard };
 
   if (!started) {
@@ -230,6 +241,19 @@ export const TakeQuiz: React.FC = () => {
   }
 
   const q = quiz.questions[currentQ];
+  
+  // Kiểm tra câu hỏi hiện tại hợp lệ
+  if (!q || !q.id || !q.text) {
+    console.error('[TakeQuiz] Invalid question at index', currentQ, q);
+    return (
+      <div className="max-w-lg mx-auto px-4 py-20 text-center space-y-4">
+        <AlertCircle className="h-12 w-12 text-red-400 mx-auto" />
+        <p className="text-slate-600 dark:text-slate-400">Câu hỏi {currentQ + 1} không hợp lệ</p>
+        <Button onClick={() => navigate('/')}>{t.backHome}</Button>
+      </div>
+    );
+  }
+  
   const isLast = currentQ === quiz.questions.length - 1;
   const progress = ((currentQ) / quiz.questions.length) * 100;
 

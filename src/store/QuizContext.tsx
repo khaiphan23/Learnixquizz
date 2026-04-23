@@ -119,21 +119,35 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       throw new Error('Quiz quá lớn (>1MB) - vui lòng giảm số câu hỏi hoặc độ dài nội dung');
     }
 
-    // Add timeout to prevent hanging - tăng lên 60s cho file lớn
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Kết nối quá chậm (>60s) - vui lòng thử lại sau')), 60000)
-    );
-    
     console.log('[addQuiz] Inserting quiz:', quiz.id, 'Questions:', quiz.questions.length);
     const startTime = Date.now();
     
+    // Thêm timeout 60s
+    const timeoutMs = 60000;
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
+    );
+    
     const insertPromise = supabase.from('quizzes').insert(row);
     
-    const result = await Promise.race([insertPromise, timeoutPromise]) as any;
+    let result: any;
+    try {
+      result = await Promise.race([insertPromise, timeoutPromise]) as any;
+    } catch (e: any) {
+      if (e.message === 'TIMEOUT') {
+        // Timeout xảy ra - đợi thêm 5s để xem operation có hoàn thành không
+        console.log('[addQuiz] Timeout after', timeoutMs, 'ms, waiting for actual result...');
+        result = await insertPromise;
+        console.log('[addQuiz] Operation actually completed after timeout');
+      } else {
+        throw e;
+      }
+    }
+    
     const duration = Date.now() - startTime;
     console.log('[addQuiz] Insert completed in', duration, 'ms');
     
-    if (result.error) {
+    if (result?.error) {
       // Rollback nếu insert thất bại
       setQuizzes(prev => prev.filter(q => q.id !== quiz.id));
       console.error('[addQuiz] Insert error:', result.error);
@@ -163,21 +177,35 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setQuizzes(prev => prev.map(q => q.id === updatedQuiz.id ? updatedQuiz : q));
     setPublicQuizzes(prev => prev.map(q => q.id === updatedQuiz.id ? updatedQuiz : q));
 
-    // Add timeout to prevent hanging - tăng lên 60s
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Kết nối quá chậm (>60s) - vui lòng thử lại sau')), 60000)
-    );
-    
     console.log('[editQuiz] Upserting quiz:', updatedQuiz.id, 'Questions:', updatedQuiz.questions.length);
     const startTime = Date.now();
     
+    // Thêm timeout 60s
+    const timeoutMs = 60000;
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
+    );
+    
     const upsertPromise = supabase.from('quizzes').upsert(row, { onConflict: 'id' });
     
-    const result = await Promise.race([upsertPromise, timeoutPromise]) as any;
+    let result: any;
+    try {
+      result = await Promise.race([upsertPromise, timeoutPromise]) as any;
+    } catch (e: any) {
+      if (e.message === 'TIMEOUT') {
+        // Timeout xảy ra - đợi thêm để xem operation có hoàn thành không
+        console.log('[editQuiz] Timeout after', timeoutMs, 'ms, waiting for actual result...');
+        result = await upsertPromise;
+        console.log('[editQuiz] Operation actually completed after timeout');
+      } else {
+        throw e;
+      }
+    }
+    
     const duration = Date.now() - startTime;
     console.log('[editQuiz] Upsert completed in', duration, 'ms');
     
-    if (result.error) {
+    if (result?.error) {
       // Không rollback edit vì khó lấy lại state cũ — chỉ log lỗi
       console.error('[editQuiz] Upsert error:', result.error);
       throw new Error('Lỗi cập nhật quiz: ' + result.error.message);
