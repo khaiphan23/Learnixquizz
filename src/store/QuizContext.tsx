@@ -108,10 +108,7 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const row = quizToDb(quiz, user.id);
     row.author = user.name;
 
-    // Optimistic: thêm vào đầu list ngay lập tức
-    setQuizzes(prev => [quiz, ...prev]);
-
-    // Kiểm tra kích thước dữ liệu
+    // Kiểm tra kích thước dữ liệu TRƯỚC khi optimistic update
     const dataSize = JSON.stringify(row).length;
     console.log('[addQuiz] Data size:', (dataSize / 1024).toFixed(2), 'KB');
     
@@ -119,39 +116,45 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       throw new Error('Quiz quá lớn (>1MB) - vui lòng giảm số câu hỏi hoặc độ dài nội dung');
     }
 
+    // Optimistic: thêm vào đầu list ngay lập tức
+    setQuizzes(prev => [quiz, ...prev]);
+
     console.log('[addQuiz] Inserting quiz:', quiz.id, 'Questions:', quiz.questions.length);
     const startTime = Date.now();
     
-    // Thêm timeout 60s
-    const timeoutMs = 60000;
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
-    );
-    
-    const insertPromise = supabase.from('quizzes').insert(row);
-    
-    let result: any;
     try {
-      result = await Promise.race([insertPromise, timeoutPromise]) as any;
-    } catch (e: any) {
-      if (e.message === 'TIMEOUT') {
-        // Timeout xảy ra - đợi thêm 5s để xem operation có hoàn thành không
-        console.log('[addQuiz] Timeout after', timeoutMs, 'ms, waiting for actual result...');
-        result = await insertPromise;
-        console.log('[addQuiz] Operation actually completed after timeout');
-      } else {
-        throw e;
+      // Thực hiện insert với timeout
+      const timeoutMs = 60000;
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
+      );
+      
+      const insertPromise = supabase.from('quizzes').insert(row);
+      
+      let result: any;
+      try {
+        result = await Promise.race([insertPromise, timeoutPromise]) as any;
+      } catch (e: any) {
+        if (e.message === 'TIMEOUT') {
+          console.log('[addQuiz] Timeout after', timeoutMs, 'ms, waiting for actual result...');
+          result = await insertPromise;
+          console.log('[addQuiz] Operation completed after timeout');
+        } else {
+          throw e;
+        }
       }
-    }
-    
-    const duration = Date.now() - startTime;
-    console.log('[addQuiz] Insert completed in', duration, 'ms');
-    
-    if (result?.error) {
-      // Rollback nếu insert thất bại
+      
+      const duration = Date.now() - startTime;
+      console.log('[addQuiz] Insert completed in', duration, 'ms');
+      
+      if (result?.error) {
+        throw new Error('Lỗi lưu quiz: ' + result.error.message);
+      }
+    } catch (error: any) {
+      // Rollback: xóa quiz khỏi state nếu insert thất bại
       setQuizzes(prev => prev.filter(q => q.id !== quiz.id));
-      console.error('[addQuiz] Insert error:', result.error);
-      throw new Error('Lỗi lưu quiz: ' + result.error.message);
+      console.error('[addQuiz] Insert failed, rolled back:', error.message);
+      throw error;
     }
   };
 
