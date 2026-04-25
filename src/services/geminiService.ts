@@ -1,164 +1,434 @@
 /// <reference types="vite/client" />
 import { Question, EssayGrade } from '../types';
 
-const GEMINI_API_KEY =
-  (import.meta.env.VITE_GEMINI_API_KEY ||
-    (typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : '')) as string;
+// ─── Config ──────────────────────────────────────────────────────────────────
 
-const USE_API_ROUTE = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+const GEMINI_API_KEY = (
+  import.meta.env.VITE_GEMINI_API_KEY ||
+  (typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : '')
+) as string;
 
-async function callGemini(prompt: string): Promise<string> {
+const USE_API_ROUTE =
+  typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+
+// ─── Core API call ───────────────────────────────────────────────────────────
+
+async function callGemini(prompt: string, maxTokens = 4096): Promise<string> {
   if (USE_API_ROUTE) {
-    try {
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
-      });
-
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await response.text();
-        console.error('API returned non-JSON response:', text);
-        throw new Error(`Server trả về định dạng không hợp lệ (có thể là lỗi 404/500 của Vercel).`);
-      }
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'API request failed');
-      }
-
-      return data.text;
-    } catch (error: any) {
-      throw new Error(`Lỗi API: ${error.message}`);
+    const response = await fetch('/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+    const ct = response.headers.get('content-type') ?? '';
+    if (!ct.includes('application/json')) {
+      const text = await response.text();
+      throw new Error(`Server trả về định dạng không hợp lệ: ${text.slice(0, 200)}`);
     }
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'API request failed');
+    return data.text as string;
   }
 
   if (!GEMINI_API_KEY) {
     throw new Error('Thiếu VITE_GEMINI_API_KEY — vui lòng kiểm tra biến môi trường');
   }
 
-  const MODELS = [
-    'gemini-1.5-flash',
-    'gemini-1.5-pro',
-    'gemini-2.0-flash-exp',
-  ];
-
+  const MODELS = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp'];
   let lastError = '';
 
   for (const model of MODELS) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 30_000);
 
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.4, maxOutputTokens: maxTokens },
+          }),
+          signal: ctrl.signal,
+        }
+      );
 
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
-        }),
-        signal: controller.signal,
-      });
+      clearTimeout(tid);
 
-      clearTimeout(timeout);
-
-      if (res.status === 429) {
-        lastError = `${model}: quota exceeded`;
-        continue;
-      }
-
-      if (res.status === 404) {
-        lastError = `${model}: model không tồn tại`;
-        continue;
-      }
-
+      if (res.status === 429) { lastError = `${model}: quota exceeded`; continue; }
+      if (res.status === 404) { lastError = `${model}: model not found`; continue; }
       if (!res.ok) {
-        const txt = await res.text().catch(() => res.statusText);
-        lastError = `${model}: ${res.status} ${txt}`;
+        lastError = `${model}: ${res.status} ${await res.text().catch(() => '')}`;
         continue;
       }
 
       const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (text) return text;
-
-      lastError = `${model}: response rỗng`;
+      lastError = `${model}: empty response`;
     } catch (err: any) {
-      if (err.name === 'AbortError') {
-        lastError = `${model}: timeout 30s`;
-      } else {
-        lastError = `${model}: ${err.message}`;
-      }
-      continue;
+      lastError = err.name === 'AbortError' ? `${model}: timeout` : `${model}: ${err.message}`;
     }
   }
 
   throw new Error(`Gemini API lỗi: ${lastError}`);
 }
 
+// ─── JSON helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Extracts and repairs a JSON array from raw AI output.
+ * Handles markdown fences, control chars, trailing commas, etc.
+ */
+function extractJsonArray(raw: string): unknown[] {
+  // Strip markdown fences
+  let text = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+
+  // Remove control characters except standard whitespace
+  text = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '');
+
+  // Fix trailing commas: ,] or ,}
+  text = text.replace(/,\s*([}\]])/g, '$1');
+
+  // Try to find the outermost JSON array
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start !== -1 && end > start) {
+    text = text.slice(start, end + 1);
+  }
+
+  return JSON.parse(text) as unknown[];
+}
+
+// ─── Question validator ───────────────────────────────────────────────────────
+
+function isValidQuestion(q: unknown): q is Partial<Question> {
+  if (!q || typeof q !== 'object') return false;
+  const item = q as Record<string, unknown>;
+
+  if (typeof item.text !== 'string' || !item.text.trim()) return false;
+
+  const type = item.type as string;
+  if (!['multiple-choice', 'true-false', 'essay'].includes(type)) return false;
+
+  if (type === 'multiple-choice') {
+    return (
+      Array.isArray(item.options) &&
+      (item.options as unknown[]).length === 4 &&
+      typeof item.correctAnswerIndex === 'number' &&
+      item.correctAnswerIndex >= 0 &&
+      item.correctAnswerIndex <= 3
+    );
+  }
+
+  if (type === 'true-false') {
+    return (
+      Array.isArray(item.options) &&
+      (item.options as unknown[]).length === 2 &&
+      typeof item.correctAnswerIndex === 'number' &&
+      item.correctAnswerIndex >= 0 &&
+      item.correctAnswerIndex <= 1
+    );
+  }
+
+  // essay
+  return true;
+}
+
+function normaliseQuestion(raw: Record<string, unknown>): Omit<Question, 'id'> {
+  const type = raw.type as Question['type'];
+  return {
+    type,
+    text: String(raw.text ?? '').trim(),
+    options: Array.isArray(raw.options)
+      ? (raw.options as unknown[]).map(String)
+      : [],
+    correctAnswerIndex:
+      typeof raw.correctAnswerIndex === 'number' ? raw.correctAnswerIndex : 0,
+    explanation: typeof raw.explanation === 'string' ? raw.explanation.trim() : '',
+    sampleAnswer: typeof raw.sampleAnswer === 'string' ? raw.sampleAnswer.trim() : undefined,
+  };
+}
+
+// ─── Generate quiz from topic (AI-authored) ───────────────────────────────────
+
+const TOPIC_PROMPT = (
+  topic: string,
+  num: number,
+  difficulty: string,
+  lang: string
+) => `You are an expert quiz author. Create ${num} quiz questions about "${topic}".
+Difficulty: ${difficulty}. Language: ${lang === 'vi' ? 'Vietnamese' : 'English'}.
+
+Rules:
+- Mix types: mostly multiple-choice, optionally 1-2 true-false or essay.
+- Each question must be distinct, accurate, and educationally valuable.
+- For multiple-choice: exactly 4 options, one clearly correct.
+- For true-false: options must be ${lang === 'vi' ? '["Đúng","Sai"]' : '["True","False"]'}.
+- For essay: set options to [] and provide a sampleAnswer.
+- Explanation must be concise (1–2 sentences).
+
+Return ONLY a valid JSON array — no markdown, no extra text:
+[
+  {
+    "type": "multiple-choice",
+    "text": "Question text",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correctAnswerIndex": 0,
+    "explanation": "Why this is correct."
+  }
+]`;
+
 export async function generateQuizAI(
   topic: string,
   numQuestions: number,
   difficulty: string,
-  language: string,
-  attempt = 0
+  language: string
 ): Promise<Question[]> {
-  const lang = language === 'en' ? 'English' : 'Vietnamese';
+  const lang = language === 'en' ? 'en' : 'vi';
 
-  // Simpler prompt on retry
-  const prompt = attempt > 0 
-    ? `Tạo ${numQuestions} câu hỏi trắc nghiệm về "${topic}" (độ khó: ${difficulty}). Trả về JSON array:
-[{"type":"multiple-choice","text":"Câu hỏi","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":""}]`
-    : `Generate ${numQuestions} quiz questions about "${topic}" at ${difficulty} difficulty. Respond in ${lang}.
-Return ONLY a valid JSON array, no markdown, no extra text:
-[{"type":"multiple-choice","text":"question text","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":"why A is correct"}]
-Types allowed: multiple-choice (4 options), true-false (options: ["True","False"] or ["Đúng","Sai"]).`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const prompt =
+      attempt === 0
+        ? TOPIC_PROMPT(topic, numQuestions, difficulty, lang)
+        : // Simpler fallback on retry
+          `Generate ${numQuestions} ${difficulty} quiz questions about "${topic}" in ${lang === 'vi' ? 'Vietnamese' : 'English'}.
+Return ONLY JSON array:
+[{"type":"multiple-choice","text":"...","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":"..."}]`;
 
-  try {
-    const text = await callGemini(prompt);
-    console.log(`[generateQuizAI] Response length: ${text.length}, attempt: ${attempt}`);
-    
-    // Repair JSON
-    let clean = text.replace(/```json\s*|```\s*/gi, '').trim();
-    clean = clean.replace(/[\x00-\x1F\x7F-\x9F]/g, ''); // Remove control chars
-    clean = clean.replace(/,\s*([}\]])/g, '$1'); // Fix trailing commas
-    
     try {
-      const parsed = JSON.parse(clean);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        console.log(`[generateQuizAI] Success: ${parsed.length} questions`);
-        return parsed;
-      }
-      throw new Error('Empty or invalid array');
-    } catch (parseError) {
-      // Try extract JSON array
-      const match = clean.match(/\[[\s\S]*\]/);
-      if (match) {
-        try {
-          const extracted = JSON.parse(match[0]);
-          if (Array.isArray(extracted) && extracted.length > 0) {
-            console.log(`[generateQuizAI] Extracted ${extracted.length} questions from array`);
-            return extracted;
-          }
-        } catch (e) { console.error('[generateQuizAI] Extract failed:', e); }
-      }
-      throw parseError;
+      const raw = await callGemini(prompt);
+      const parsed = extractJsonArray(raw);
+
+      const valid = parsed
+        .filter(isValidQuestion)
+        .map((q) => normaliseQuestion(q as Record<string, unknown>));
+
+      if (valid.length > 0) return valid as Question[];
+      throw new Error('No valid questions in response');
+    } catch (err: any) {
+      console.warn(`[generateQuizAI] attempt ${attempt + 1} failed:`, err.message);
+      if (attempt === 2) throw new Error('Không tạo được câu hỏi — vui lòng thử lại.');
     }
-  } catch (error: any) {
-    console.error(`[generateQuizAI] Error (attempt ${attempt}):`, error.message);
-    
-    if (attempt < 2) {
-      console.log('[generateQuizAI] Retrying with simpler prompt...');
-      return generateQuizAI(topic, numQuestions, difficulty, language, attempt + 1);
-    }
-    
-    throw new Error('Không parse được dữ liệu từ AI — thử lại sau');
   }
+
+  throw new Error('Không tạo được câu hỏi — vui lòng thử lại.');
 }
+
+// ─── Generate questions from pasted / extracted content ────────────────────────
+
+/**
+ * System prompt for extracting questions from document content.
+ * Mirrors the system prompt in document index 43.
+ */
+const EXTRACT_SYSTEM = `You are an AI system specialized in extracting quiz questions from educational documents with ABSOLUTE FIDELITY.
+
+CORE GUARANTEES:
+1. Extract EVERY question — no skipping, no merging.
+2. Preserve EXACT original text — do not paraphrase, fix grammar, or rewrite.
+3. Maintain original ORDER — sort by appearance, not by numbering.
+4. DO NOT fabricate answers — if the answer is not explicitly marked, set correctAnswerIndex to 0.
+5. DO NOT merge separate questions even if numbering is duplicated.
+
+QUESTION RECOGNITION — include ALL of the following:
+- Numbered items (1. 2. 3. / Câu 1. Câu 2.)
+- Items with A/B/C/D options
+- True/False items
+- Fill-in-the-blank / cloze items
+- Writing / transformation / word-form exercises
+- Open-ended questions
+
+TYPE CLASSIFICATION:
+- "multiple-choice" → exactly 4 options (A B C D)
+- "true-false"      → 2 options: ["Đúng","Sai"] or ["True","False"]
+- "essay"           → everything else (transformation, word form, open-ended, fill-blank)
+
+ANSWER DETECTION (strict priority):
+1. Explicit label: "Đáp án:", "Answer:", "Key:"
+2. Marked option: (*), ✓, bold, underline, →text← markers
+3. No marker found → correctAnswerIndex: 0  (DO NOT guess)
+
+OUTPUT — return ONLY valid JSON, no markdown, no preamble:
+[
+  {
+    "type": "multiple-choice" | "true-false" | "essay",
+    "text": "exact original question text including its number",
+    "options": ["option A text", "option B text", "option C text", "option D text"],
+    "correctAnswerIndex": 0,
+    "explanation": "",
+    "sampleAnswer": ""
+  }
+]
+
+For essay questions: options = [], sampleAnswer = "" (leave empty — do not invent).
+For true-false: options = ["Đúng","Sai"] or ["True","False"] as appropriate.`;
+
+const MAX_CHUNK_CHARS = 4000;
+
+/** Split content at question boundaries to avoid cutting mid-question. */
+function smartChunk(content: string, maxChars: number): string[] {
+  if (content.length <= maxChars) return [content];
+
+  const lines = content.split('\n');
+  const chunks: string[] = [];
+  let current = '';
+
+  for (const line of lines) {
+    const isQuestionStart = /^(câu\s+)?\d+[.)]/i.test(line.trim());
+
+    if (isQuestionStart && current.length + line.length > maxChars && current.trim()) {
+      chunks.push(current.trim());
+      current = '';
+    }
+    current += line + '\n';
+  }
+
+  if (current.trim()) chunks.push(current.trim());
+  return chunks;
+}
+
+/** Process a single chunk with up to 3 attempts (progressively simpler prompts). */
+async function extractFromChunk(chunk: string, chunkIndex: number): Promise<Partial<Question>[]> {
+  const safeChunk = chunk
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+
+  const prompts = [
+    // Attempt 0 — full system prompt
+    `${EXTRACT_SYSTEM}\n\nCONTENT:\n${safeChunk}\n\nJSON ARRAY:`,
+
+    // Attempt 1 — shorter directive
+    `Extract quiz questions from the text below. Return ONLY a JSON array.
+Text:\n${safeChunk}\n
+Format: [{"type":"multiple-choice","text":"...","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":"","sampleAnswer":""}]
+JSON:`,
+
+    // Attempt 2 — minimal
+    `Return a JSON array of quiz questions from:\n${safeChunk.slice(0, 3000)}\n
+[{"type":"multiple-choice","text":"Q","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":"","sampleAnswer":""}]`,
+  ];
+
+  for (let attempt = 0; attempt < prompts.length; attempt++) {
+    try {
+      const raw = await callGemini(prompts[attempt], 4096);
+      const parsed = extractJsonArray(raw);
+      const valid = parsed.filter(isValidQuestion) as Partial<Question>[];
+      if (valid.length > 0) {
+        console.log(`[extractFromChunk] chunk ${chunkIndex}, attempt ${attempt}: ${valid.length} questions`);
+        return valid;
+      }
+    } catch (err: any) {
+      console.warn(`[extractFromChunk] chunk ${chunkIndex}, attempt ${attempt} failed:`, err.message);
+    }
+  }
+
+  // Last resort: manual regex extraction
+  console.warn(`[extractFromChunk] chunk ${chunkIndex}: falling back to manual extraction`);
+  return manualExtract(chunk);
+}
+
+/** Regex-based extraction as absolute last resort. */
+function manualExtract(text: string): Partial<Question>[] {
+  const questions: Partial<Question>[] = [];
+  const lines = text.split('\n');
+  let current: Partial<Question> | null = null;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    // Question line: "1." / "Câu 1." / "1)"
+    const qm = line.match(/^(?:câu\s+)?(\d+)[.)]\s+(.+)/i);
+    if (qm) {
+      if (current && current.text) questions.push(current);
+      current = {
+        type: 'multiple-choice',
+        text: line,
+        options: [],
+        correctAnswerIndex: 0,
+        explanation: '',
+      };
+      continue;
+    }
+
+    // Option line: "A. ..." / "A) ..."
+    const om = line.match(/^([A-D])[.)]\s+(.+)/);
+    if (om && current) {
+      if (!current.options) current.options = [];
+      (current.options as string[]).push(om[2].trim());
+
+      // Detect explicit answer markers
+      if (line.includes('[→') || line.includes('✓') || line.includes('(*)')) {
+        current.correctAnswerIndex = 'ABCD'.indexOf(om[1]);
+      }
+      // If we have 4 options, decide type
+      if ((current.options as string[]).length === 4) current.type = 'multiple-choice';
+      if ((current.options as string[]).length === 2) current.type = 'true-false';
+    }
+  }
+
+  if (current && current.text) questions.push(current);
+  return questions.filter(isValidQuestion);
+}
+
+/** Deduplicate by text similarity to avoid cross-chunk duplicates. */
+function deduplicateQuestions(questions: Partial<Question>[]): Partial<Question>[] {
+  const seen = new Set<string>();
+  return questions.filter((q) => {
+    const key = (q.text ?? '').trim().slice(0, 80).toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export async function generateQuestionsFromContent(
+  content: string,
+  language: string
+): Promise<Question[]> {
+  if (!content.trim()) {
+    throw new Error('Nội dung trống — vui lòng nhập hoặc trích xuất nội dung trước');
+  }
+
+  const chunks = smartChunk(content.trim(), MAX_CHUNK_CHARS);
+  console.log(`[generateQuestionsFromContent] ${chunks.length} chunk(s) from ${content.length} chars`);
+
+  const allRaw: Partial<Question>[] = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const extracted = await extractFromChunk(chunk, i + 1);
+    allRaw.push(...extracted);
+  }
+
+  const deduped = deduplicateQuestions(allRaw);
+
+  // Sort by question number if detectable
+  const withNum = deduped.map((q) => ({
+    q,
+    num: parseInt((q.text ?? '').match(/(\d+)/)?.[1] ?? '0', 10),
+  }));
+  withNum.sort((a, b) => a.num - b.num);
+
+  const finalQuestions = withNum.map(({ q }) =>
+    normaliseQuestion(q as Record<string, unknown>)
+  ) as Question[];
+
+  console.log(`[generateQuestionsFromContent] Final: ${finalQuestions.length} questions`);
+
+  if (finalQuestions.length === 0) {
+    throw new Error(
+      'AI không trích xuất được câu hỏi hợp lệ nào. Vui lòng kiểm tra định dạng nội dung.'
+    );
+  }
+
+  return finalQuestions;
+}
+
+// ─── AI explanation for wrong answers ────────────────────────────────────────
 
 export async function getAIExplanation(
   question: string,
@@ -168,423 +438,41 @@ export async function getAIExplanation(
   const prompt = `Quiz question: "${question}"
 User answered: "${userAnswer}"
 Correct answer: "${correctAnswer}"
-Explain briefly (2-3 sentences) why the correct answer is right.`;
-  return callGemini(prompt);
+Explain in 2-3 sentences why the correct answer is right and why the user's answer is wrong. Be concise and educational.`;
+
+  return callGemini(prompt, 512);
 }
 
-export async function generateQuestionsFromContent(
-  content: string,
-  language: string
-): Promise<Question[]> {
-  const lang = language === 'en' ? 'English' : 'Vietnamese';
-
-  if (!content.trim()) {
-    throw new Error('Nội dung trống — vui lòng nhập hoặc trích xuất nội dung trước');
-  }
-
-  // Split content into chunks - smaller chunks for better accuracy
-  const MAX_CHUNK_SIZE = 3000; // Reduced from 8000 to ensure all questions processed
-  let allQuestions: any[] = [];
-  
-  // Count expected questions in content
-  const questionMatches = content.match(/^(?:Câu\s+|)\d+[.\)]/gim) || [];
-  const expectedQuestionCount = questionMatches.length;
-  console.log(`[AI Debug] Expected questions in content: ${expectedQuestionCount}`);
-
-  // Escape special characters for JSON safety
-  const escapeForJson = (str: string): string => {
-    return str
-      .replace(/\\/g, '\\\\')
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t');
-  };
-
-  // Try to repair malformed JSON from AI
-  const repairJson = (str: string): string => {
-    // Remove control characters
-    str = str.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
-    // Fix trailing commas
-    str = str.replace(/,\s*([}\]])/g, '$1');
-    // Fix missing quotes around property names
-    str = str.replace(/(\{|,\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-    return str;
-  };
-
-  const processChunk = async (chunkContent: string, isRetry = false, attempt = 0): Promise<any[]> => {
-    const safeContent = escapeForJson(chunkContent);
-    let prompt;
-    
-    if (attempt >= 2) {
-      // Last resort - extremely simple prompt
-      prompt = `Extract quiz questions. Return JSON array only.
-
-Text: ${safeContent.substring(0, 4000)}
-
-Format: [{"type":"multiple-choice","text":"Q","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":""}]
-
-JSON:`;
-    } else if (isRetry) {
-      prompt = `Trích xuất câu hỏi từ nội dung. Trả về JSON array.
-
-Nội dung: ${safeContent.substring(0, 5000)}
-
-Tìm tất cả câu có đánh số (1., 2., Câu 1, Câu 2) và options A,B,C,D.
-
-Format:
-[{"type":"multiple-choice","text":"1. Câu hỏi","options":["A...","B...","C...","D..."],"correctAnswerIndex":0,"explanation":""}]
-
-Lưu ý:
-- Giữ nguyên thứ tự
-- Không bỏ sót câu nào
-- JSON hợp lệ, không trailing commas`;
-    } else {
-      prompt = `Bạn là hệ thống AI chuyên trích xuất quiz từ tài liệu. Nhiệm vụ: Chuyển đổi sang JSON mà KHÔNG làm mất câu hỏi, thứ tự, nội dung, đáp án.
-
-========================
-NGUYÊN TẮC TUYỆT ĐỐI
-========================
-
-1. KHÔNG THAY ĐỔI NỘI DUNG
-- Giữ nguyên 100% câu hỏi và đáp án
-- Không viết lại, không rút gọn, không sửa lỗi
-- Không thay đổi thứ tự xuất hiện
-
-2. KHÔNG MẤT DỮ LIỆU
-- Phải trích xuất TẤT CẢ câu hỏi
-- Không được bỏ sót: câu trùng số, câu sai format, câu trong đoạn văn
-
-3. THỨ TỰ LÀ TUYỆT ĐỐI
-- Giữ đúng thứ tự xuất hiện trong tài liệu
-
-4. XỬ LÝ SỐ THỨ TỰ TRÙNG
-- Nếu nhiều câu có cùng số → vẫn giữ tất cả
-- KHÔNG gộp, KHÔNG xóa, KHÔNG sửa
-
-========================
-NHẬN DIỆN CÂU HỎI
-========================
-
-Một câu được coi là câu hỏi nếu có:
-- số thứ tự (1, 2, 3... hoặc Câu 1, Câu 2...)
-- đáp án A, B, C, D
-- chỗ trống ______
-- yêu cầu viết lại / biến đổi
-
-BAO GỒM TẤT CẢ DẠNG: trắc nghiệm, đúng/sai, tự luận, điền khuyết, viết lại.
-
-========================
-XỬ LÝ CÂU HỎI THEO NHÓM
-========================
-
-Một đề mục có thể chứa NHIỀU câu hỏi con.
-QUY TẮC: Mỗi dòng có số là 1 câu hỏi độc lập, KHÔNG gộp.
-
-Ví dụ:
-I. PHẦN TỰ LUẬN
-Câu 1. ...
-Câu 2. ...
-Câu 3. ...
-→ phải tách thành 3 câu riêng
-
-========================
-PHÂN LOẠI CÂU HỎI
-========================
-
-"multiple-choice": Có A, B, C, D
-"true-false": Có Đúng/Sai, True/False
-"essay": Tự luận, viết lại, word form, có ___
-
-========================
-NHẬN DIỆN ĐÁP ÁN (QUAN TRỌNG)
-========================
-
-Ưu tiên 1: Có "Đáp án:", "Answer:", "→text←"
-Ưu tiên 2: Có (*), ✓ trước option
-Ưu tiên 3: Option được đánh dấu
-
-QUY TẮC: Nếu không tìm thấy → correctAnswerIndex: 0
-
-========================
-KHÔNG SUY ĐOÁN
-========================
-- KHÔNG tự điền đáp án
-- KHÔNG dùng kiến thức cá nhân
-
-========================
-NỘI DUNG:
-========================
-${safeContent}
-
-========================
-OUTPUT (JSON ARRAY):
-========================
-[
-  {"type":"multiple-choice","text":"1. Câu hỏi","options":["A...","B...","C...","D..."],"correctAnswerIndex":0,"explanation":""},
-  {"type":"essay","text":"Câu 2. Trình bày...","options":[],"correctAnswerIndex":0,"explanation":""}
-]
-
-⚠️ ĐIỀU KIỆN THÀNH CÔNG:
-- Không mất câu nào
-- Không sai thứ tự
-- Không thay đổi nội dung
-- Không gộp câu`;
-    }
-
-    try {
-      const text = await callGemini(prompt);
-      console.log(`[AI Debug] Response length: ${text.length}, attempt: ${attempt}, isRetry: ${isRetry}`);
-      
-      // Clean and repair JSON
-      let clean = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
-      clean = repairJson(clean);
-      
-      // Find JSON array
-      const match = clean.match(/\[[\s\S]*\]/);
-      if (match) clean = match[0];
-      
-      const parsed = JSON.parse(clean);
-      if (Array.isArray(parsed)) return parsed;
-      throw new Error('Not an array');
-    } catch (e: any) {
-      console.error(`[AI Debug] Parse failed (attempt ${attempt}):`, e.message);
-      
-      if (attempt < 2) {
-        console.log(`[AI Debug] Retrying with simpler prompt (attempt ${attempt + 1})...`);
-        return processChunk(chunkContent, true, attempt + 1);
-      }
-      
-      // Last resort: try to extract individual questions
-      console.log('[AI Debug] Trying emergency extraction...');
-      return extractQuestionsManually(chunkContent);
-    }
-  };
-
-  // Emergency manual extraction if AI completely fails - keeps original order
-  const extractQuestionsManually = (text: string): any[] => {
-    const questions: any[] = [];
-    const lines = text.split('\n');
-    let currentQuestion: any = null;
-    let currentQuestionNum = 0;
-    let optionCount = 0;
-    let linesAfterQuestion = 0;
-    
-    // Header patterns to skip
-    const headerPatterns = [
-      /^(test\s+\d+|keys?|pronunciation|vocabulary|grammar|reading|writing|error\s+correction|matching|open\s+cloze|iii?\.|iv\.|v\.)/i,
-      /^(choose\s+the\s+(word|best))/i,
-      /^(read\s+the\s+(text|passage|following))/i,
-      /^(a\.\s*choose|b\.\s*choose)/i,
-      /^(kiến\s+thức|cần\s+nhớ|kiến\s+thức\s+cần\s+nhớ)/i,
-      /^(phần\s+tự\s+luận|phần\s+trắc\s+nghiệm|bài\s+tự\s+luận)/i,
-      /^(ôn\s+thường\s+xuyên|ôn\s+tập|đề\s+cương)/i,
-      /^(khtn|toán|lý|hóa|sinh|sử|địa|anh\s*văn)/i
-    ];
-
-    for (let i = 0; i < lines.length; i++) {
-      const trimmed = lines[i].trim();
-      if (!trimmed || trimmed.length < 3) continue;
-      
-      // Skip headers/section titles
-      if (headerPatterns.some(p => p.test(trimmed))) {
-        console.log(`[Manual Extract] Skipping header: ${trimmed.substring(0, 50)}`);
-        continue;
-      }
-      
-      // Match numbered question (1. 2. 3. or Câu 1. Câu 2.) - must be at start
-      const qMatch = trimmed.match(/^(?:Câu\s+)?(\d+)[.\)]\s*(.+)/i);
-      if (qMatch) {
-        const questionNum = parseInt(qMatch[1]);
-        const questionText = qMatch[2].trim();
-        
-        // Save previous question if valid (has options OR is essay type)
-        if (currentQuestion) {
-          if (currentQuestion.options.length >= 2) {
-            // Multiple choice
-            questions.push(currentQuestion);
-          } else if (currentQuestion.options.length === 0 && linesAfterQuestion > 0) {
-            // Essay - no options but has content after
-            currentQuestion.type = 'essay';
-            questions.push(currentQuestion);
-          }
-        }
-        
-        // Start new question
-        currentQuestionNum = questionNum;
-        currentQuestion = {
-          type: 'multiple-choice', // Default, will change to essay if no options found
-          text: trimmed, // Keep full text including number
-          options: [],
-          correctAnswerIndex: 0,
-          explanation: '',
-          _questionNum: questionNum // Keep track for ordering
-        };
-        optionCount = 0;
-        linesAfterQuestion = 0;
-        continue;
-      }
-      
-      // Match option A. B. C. D. - only if we have a current question
-      const optMatch = trimmed.match(/^([A-D])[.\)]\s*(.+)/);
-      if (optMatch && currentQuestion) {
-        const optionText = optMatch[2].trim();
-        currentQuestion.options.push(optionText);
-        linesAfterQuestion++;
-        
-        // Check for answer markers in option
-        if (optionText.includes('→') || optionText.includes('[→') || 
-            optionText.includes('____') || /\b(answer|đáp án)\s*[:=]\s*[A-D]\b/i.test(trimmed)) {
-          currentQuestion.correctAnswerIndex = optionCount;
-          console.log(`[Manual Extract] Q${currentQuestionNum}: Found marker at option ${optMatch[1]}`);
-        }
-        optionCount++;
-      } else if (currentQuestion && !optMatch) {
-        // Content after question but not an option - could be continuation
-        linesAfterQuestion++;
-      }
-    }
-    
-    // Add last question
-    if (currentQuestion) {
-      if (currentQuestion.options.length >= 2) {
-        questions.push(currentQuestion);
-      } else if (currentQuestion.options.length === 0) {
-        // Essay type
-        currentQuestion.type = 'essay';
-        questions.push(currentQuestion);
-      }
-    }
-    
-    // Sort by question number to ensure order
-    questions.sort((a, b) => (a._questionNum || 0) - (b._questionNum || 0));
-    
-    // Remove internal tracking field
-    questions.forEach(q => delete q._questionNum);
-    
-    console.log(`[AI Debug] Manual extraction: Found ${questions.length} questions (${questions.filter(q => q.type === 'essay').length} essay, ${questions.filter(q => q.type === 'multiple-choice').length} MC)`);
-    return questions;
-  };
-
-  // Smart chunking - split by question numbers to avoid cutting questions
-  const splitByQuestions = (text: string, maxSize: number): string[] => {
-    const chunks: string[] = [];
-    let currentChunk = '';
-    
-    // Find all question boundaries (lines starting with number)
-    const lines = text.split('\n');
-    let lastQuestionIndex = 0;
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      // Check if this is a new question (starts with number)
-      if (/^\d+[.\)]/.test(line.trim())) {
-        // If current chunk is getting too big, save it and start new
-        if (currentChunk.length > maxSize && lastQuestionIndex > 0) {
-          chunks.push(currentChunk.trim());
-          // Keep last few lines for context in next chunk
-          const contextLines = lines.slice(Math.max(0, lastQuestionIndex - 3), i);
-          currentChunk = contextLines.join('\n') + '\n';
-        }
-        lastQuestionIndex = i;
-      }
-      currentChunk += line + '\n';
-    }
-    
-    // Add remaining content
-    if (currentChunk.trim()) {
-      chunks.push(currentChunk.trim());
-    }
-    
-    return chunks.length > 0 ? chunks : [text];
-  };
-
-  // Process content
-  let chunks: string[];
-  if (content.length > MAX_CHUNK_SIZE) {
-    chunks = splitByQuestions(content, MAX_CHUNK_SIZE);
-    console.log(`[AI Debug] Smart splitting: ${chunks.length} chunks (by questions)`);
-  } else {
-    chunks = [content];
-  }
-  
-  for (let i = 0; i < chunks.length; i++) {
-    console.log(`[AI Debug] Processing chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
-    const chunkQuestions = await processChunk(chunks[i]);
-    allQuestions = [...allQuestions, ...chunkQuestions];
-  }
-
-  console.log(`[AI Debug] Total questions extracted: ${allQuestions.length}`);
-
-  // Validate all questions
-  const parsed = allQuestions;
-
-  // Validate and filter questions
-  const validQuestions = parsed.filter((q: any, idx: number) => {
-    if (!q || typeof q !== 'object') {
-      console.log(`[AI Debug] Item ${idx} invalid: not an object`);
-      return false;
-    }
-    if (!q.type || !q.text) {
-      console.log(`[AI Debug] Item ${idx} invalid: missing type or text`, q);
-      return false;
-    }
-    if (q.type === 'multiple-choice') {
-      const valid = Array.isArray(q.options) && q.options.length === 4 &&
-             typeof q.correctAnswerIndex === 'number' &&
-             q.correctAnswerIndex >= 0 && q.correctAnswerIndex <= 3;
-      if (!valid) console.log(`[AI Debug] MC question ${idx} invalid:`, q.options, q.correctAnswerIndex);
-      return valid;
-    }
-    if (q.type === 'true-false') {
-      const valid = Array.isArray(q.options) && q.options.length === 2 &&
-             typeof q.correctAnswerIndex === 'number' &&
-             q.correctAnswerIndex >= 0 && q.correctAnswerIndex <= 1;
-      return valid;
-    }
-    if (q.type === 'essay') {
-      // Essay questions don't need sampleAnswer for parsing from file
-      return true;
-    }
-    return false;
-  });
-
-  console.log(`[AI Debug] Valid questions: ${validQuestions.length}/${parsed.length}`);
-
-  if (validQuestions.length === 0) {
-    throw new Error('AI không trích xuất được câu hỏi hợp lệ nào. Vui lòng kiểm tra nội dung file.');
-  }
-
-  // Sort by question number to maintain original order
-  const sortedQuestions = validQuestions.sort((a: any, b: any) => {
-    // Try to extract question number from text
-    const numA = parseInt(a.text?.match(/^\d+/)?.[0] || '0');
-    const numB = parseInt(b.text?.match(/^\d+/)?.[0] || '0');
-    return numA - numB;
-  });
-
-  console.log(`[AI Debug] Returning ${sortedQuestions.length} questions in original order`);
-  return sortedQuestions;
-}
+// ─── Essay grading ────────────────────────────────────────────────────────────
 
 export async function gradeEssayAI(
   question: string,
   answer: string,
   sampleAnswer?: string
 ): Promise<EssayGrade> {
-  const prompt = `Grade this essay answer 0-100.
+  const prompt = `Grade the following essay answer on a scale of 0–100.
+
 Question: "${question}"
-${sampleAnswer ? `Sample answer: "${sampleAnswer}"` : ''}
+${sampleAnswer ? `Reference answer: "${sampleAnswer}"` : ''}
 Student answer: "${answer}"
-Return ONLY valid JSON: {"score": number, "feedback": "2-3 sentence feedback"}`;
+
+Criteria: accuracy, completeness, clarity.
+
+Return ONLY valid JSON (no markdown):
+{"score": <number 0-100>, "feedback": "<2-3 sentence feedback in the same language as the question>"}`;
 
   try {
-    const text = await callGemini(prompt);
-    const clean = text.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(clean);
-    if (typeof parsed.score === 'number') return parsed;
-    throw new Error('invalid');
+    const raw = await callGemini(prompt, 512);
+    const clean = raw.replace(/```json\s*|```\s*/gi, '').trim();
+    const parsed = JSON.parse(clean) as { score: number; feedback: string };
+    if (typeof parsed.score === 'number' && typeof parsed.feedback === 'string') {
+      return { score: Math.max(0, Math.min(100, parsed.score)), feedback: parsed.feedback };
+    }
+    throw new Error('Invalid grade structure');
   } catch {
-    return { score: 50, feedback: 'Không chấm được tự động. Vui lòng xem xét thủ công.' };
+    return {
+      score: 50,
+      feedback: 'Không chấm được tự động. Vui lòng xem xét thủ công.',
+    };
   }
 }
