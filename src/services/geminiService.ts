@@ -427,17 +427,35 @@ EXAMPLE FORMAT:
 1. A. reduced  B. created  C. needed  D. directed
 2. A. balanced B. coughed  C. produced D. learned"
 
-MUST BE EXTRACTED AS:
-- Question 1: "Which word has the underlined part pronounced differently from that of the others? 1. A. reduced B. created C. needed D. directed"
-- Question 2: "Which word has the underlined part pronounced differently from that of the others? 2. A. balanced B. coughed C. produced D. learned"
+MUST BE EXTRACTED AS SEPARATE QUESTIONS WITH REPEATED MAIN INSTRUCTION:
 
-RULES:
-1. The MAIN INSTRUCTION (e.g., "Which word has...") is the QUESTION TEXT
-2. Each numbered sub-question (1., 2., 3.) becomes a SEPARATE question
-3. REPEAT the main instruction for EACH sub-question
-4. Each sub-question's options (A. B. C. D.) belong to that specific question
-5. NEVER merge all sub-questions into one
-6. NEVER classify as essay - these are ALWAYS multiple-choice
+INPUT:
+"A. Which word has the underlined part pronounced differently from that of the others
+1. A. reduced  B. created  C. needed  D. directed
+2. A. balanced B. coughed  C. produced D. learned"
+
+OUTPUT JSON:
+[
+  {
+    "type": "multiple-choice",
+    "text": "Which word has the underlined part pronounced differently from that of the others? 1. A. reduced B. created C. needed D. directed",
+    "options": ["reduced", "created", "needed", "directed"],
+    "correctAnswerIndex": 0
+  },
+  {
+    "type": "multiple-choice", 
+    "text": "Which word has the underlined part pronounced differently from that of the others? 2. A. balanced B. coughed C. produced D. learned",
+    "options": ["balanced", "coughed", "produced", "learned"],
+    "correctAnswerIndex": 0
+  }
+]
+
+⚠️ CRITICAL RULES - FOLLOW EXACTLY:
+1. The MAIN INSTRUCTION (e.g., "Which word has...") MUST BE REPEATED in EVERY question text
+2. Each numbered sub-question (1., 2., 3.) becomes a SEPARATE question with its OWN options
+3. NEVER merge all sub-questions into one question
+4. NEVER classify as essay - these are ALWAYS multiple-choice (type: "multiple-choice")
+5. Extract options WITHOUT the A. B. C. D. prefixes (just the word)
 
 ━━━━━━━━━━━━━━━━━━━
 ANTI-ERROR VALIDATION (VERY IMPORTANT)

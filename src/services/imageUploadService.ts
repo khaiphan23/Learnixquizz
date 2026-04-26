@@ -34,12 +34,16 @@ function validateFile(file: File): void {
 export async function uploadImage(file: File, userId: string): Promise<UploadResult> {
   validateFile(file);
   
+  console.log('[uploadImage] Starting upload:', file.name, 'Size:', (file.size / 1024).toFixed(2), 'KB', 'Type:', file.type);
+  
   try {
     // Create unique filename
     const timestamp = Date.now();
     const randomString = Math.random().toString(36).substring(2, 15);
     const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg';
     const filename = `${userId}/${timestamp}-${randomString}.${extension}`;
+    
+    console.log('[uploadImage] Uploading to bucket:', BUCKET_NAME, 'Filename:', filename);
     
     // Upload to Supabase Storage
     const { data, error } = await supabase.storage
@@ -52,8 +56,16 @@ export async function uploadImage(file: File, userId: string): Promise<UploadRes
     
     if (error) {
       console.error('[uploadImage] Upload error:', error);
+      if (error.message?.includes('bucket')) {
+        throw new Error(`Bucket '${BUCKET_NAME}' chưa được tạo trong Supabase. Vui lòng tạo bucket và cấu hình RLS policy.`);
+      }
+      if (error.message?.includes('row-level security')) {
+        throw new Error(`RLS policy chưa cho phép upload. Vui lòng cấu hình RLS trong Supabase.`);
+      }
       throw new Error(`Lỗi upload: ${error.message}`);
     }
+    
+    console.log('[uploadImage] Upload success, getting public URL...');
     
     // Get public URL
     const { data: urlData } = supabase.storage
@@ -61,8 +73,10 @@ export async function uploadImage(file: File, userId: string): Promise<UploadRes
       .getPublicUrl(filename);
     
     if (!urlData?.publicUrl) {
-      throw new Error('Không thể tạo URL cho hình ảnh');
+      throw new Error('Không thể tạo URL công khai cho hình ảnh');
     }
+    
+    console.log('[uploadImage] Success! URL:', urlData.publicUrl);
     
     return {
       url: urlData.publicUrl,

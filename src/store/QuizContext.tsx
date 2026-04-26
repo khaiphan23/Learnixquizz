@@ -108,12 +108,17 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const row = quizToDb(quiz, user.id);
     row.author = user.name;
 
+    // Kiểm tra giới hạn câu hỏi
+    if (quiz.questions.length > 100) {
+      throw new Error(`Quiz quá nhiều câu hỏi (${quiz.questions.length}). Tối đa 100 câu. Vui lòng chia thành nhiều quiz nhỏ hơn.`);
+    }
+
     // Kiểm tra kích thước dữ liệu TRƯỚC khi optimistic update
     const dataSize = JSON.stringify(row).length;
-    console.log('[addQuiz] Data size:', (dataSize / 1024).toFixed(2), 'KB');
+    console.log('[addQuiz] Data size:', (dataSize / 1024).toFixed(2), 'KB', 'Questions:', quiz.questions.length);
     
-    if (dataSize > 1000000) {
-      throw new Error('Quiz quá lớn (>1MB) - vui lòng giảm số câu hỏi hoặc độ dài nội dung');
+    if (dataSize > 2000000) { // Tăng lên 2MB
+      throw new Error('Quiz quá lớn (>2MB) - vui lòng giảm số câu hỏi hoặc độ dài nội dung');
     }
 
     // Optimistic: thêm vào đầu list ngay lập tức
@@ -123,8 +128,8 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const startTime = Date.now();
     
     try {
-      // Thực hiện insert với timeout
-      const timeoutMs = 60000;
+      // Thực hiện insert với timeout (tăng lên 120s cho quiz lớn)
+      const timeoutMs = quiz.questions.length > 50 ? 120000 : 60000;
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
       );
