@@ -399,6 +399,29 @@ MULTI-LINE HANDLING
 → MUST merge them correctly
 
 ━━━━━━━━━━━━━━━━━━━
+PRONUNCIATION & COMPLEX QUESTION TYPES
+━━━━━━━━━━━━━━━━━━━
+
+For "pronunciation" or "choose the different" questions:
+
+EXAMPLE FORMAT:
+"A. Which word has the underlined part pronounced differently from that of the others
+1. A. reduced  B. created  C. needed  D. directed
+2. A. balanced B. coughed  C. produced D. learned"
+
+MUST BE EXTRACTED AS:
+- Question 1: "Which word has the underlined part pronounced differently from that of the others? 1. A. reduced B. created C. needed D. directed"
+- Question 2: "Which word has the underlined part pronounced differently from that of the others? 2. A. balanced B. coughed C. produced D. learned"
+
+RULES:
+1. The MAIN INSTRUCTION (e.g., "Which word has...") is the QUESTION TEXT
+2. Each numbered sub-question (1., 2., 3.) becomes a SEPARATE question
+3. REPEAT the main instruction for EACH sub-question
+4. Each sub-question's options (A. B. C. D.) belong to that specific question
+5. NEVER merge all sub-questions into one
+6. NEVER classify as essay - these are ALWAYS multiple-choice
+
+━━━━━━━━━━━━━━━━━━━
 ANTI-ERROR VALIDATION (VERY IMPORTANT)
 ━━━━━━━━━━━━━━━━━━━
 

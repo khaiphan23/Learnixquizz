@@ -264,9 +264,39 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const addAttempt = async (attempt: QuizAttempt) => {
-    const { error } = await supabase.from('attempts').insert(attemptToDb(attempt));
-    if (error) throw new Error(error.message);
+    // Optimistic update first
     setAttempts(prev => [...prev, attempt]);
+    
+    try {
+      // Add timeout to prevent hanging
+      const timeoutMs = 30000;
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
+      );
+      
+      const insertPromise = supabase.from('attempts').insert(attemptToDb(attempt));
+      
+      let result: any;
+      try {
+        result = await Promise.race([insertPromise, timeoutPromise]) as any;
+      } catch (e: any) {
+        if (e.message === 'TIMEOUT') {
+          console.log('[addAttempt] Timeout after', timeoutMs, 'ms, waiting for actual result...');
+          result = await insertPromise;
+        } else {
+          throw e;
+        }
+      }
+      
+      if (result?.error) {
+        throw new Error(result.error.message);
+      }
+    } catch (error: any) {
+      // Rollback on error
+      setAttempts(prev => prev.filter(a => a.id !== attempt.id));
+      console.error('[addAttempt] Failed:', error.message);
+      throw error;
+    }
   };
 
   const updateAttempt = async (id: string, updates: Partial<QuizAttempt>) => {
