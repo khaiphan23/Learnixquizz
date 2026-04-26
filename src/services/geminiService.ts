@@ -34,7 +34,7 @@ async function callGemini(prompt: string, maxTokens = 8192): Promise<string> {
     throw new Error('Thiếu VITE_GEMINI_API_KEY — vui lòng kiểm tra biến môi trường');
   }
 
-  const MODELS = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp'];
+  const MODELS = ['gemini-3.1-flash', 'gemini-3.1-pro', 'gemini-2.5-pro'];
   let lastError = '';
 
   for (const model of MODELS) {
@@ -126,10 +126,28 @@ function isValidRaw(q: unknown): q is Record<string, unknown> {
 }
 
 function normalise(raw: Record<string, unknown>): Omit<Question, 'id'> {
-  const type = raw.type as Question['type'];
+  let type = raw.type as Question['type'];
   const options = Array.isArray(raw.options)
     ? (raw.options as unknown[]).map(String)
     : [];
+
+  // AUTO-CORRECT: Force type based on options (AI sometimes misclassifies)
+  if (options.length >= 2) {
+    // Check for true-false pattern
+    const optTexts = options.map(o => o.toLowerCase().trim());
+    const hasTrueFalse = optTexts.includes('true') && optTexts.includes('false') ||
+                         optTexts.includes('đúng') && optTexts.includes('sai');
+    
+    if (options.length === 2 && hasTrueFalse) {
+      type = 'true-false';
+    } else {
+      // 2+ options = multiple-choice (even if AI says essay)
+      type = 'multiple-choice';
+    }
+  } else if (options.length === 0) {
+    // No options = essay
+    type = 'essay';
+  }
 
   // Clamp correctAnswerIndex to valid range
   const maxIdx = options.length > 0 ? options.length - 1 : 0;
