@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './store/AuthContext';
 import { QuizProvider } from './store/QuizContext';
 import { LangProvider } from './store/LangContext';
 import { Navbar } from './components/Navbar';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Home } from './pages/Home';
 import { Login, Register, ForgotPassword } from './pages/Auth';
 import { MyQuizzes } from './pages/MyQuizzes';
@@ -96,15 +97,17 @@ const AppLayout: React.FC = () => {
 };
 
 const App: React.FC = () => (
-  <LangProvider>
-    <AuthProvider>
-      <QuizProvider>
-        <HashRouter>
-          <AppLayout />
-        </HashRouter>
-      </QuizProvider>
-    </AuthProvider>
-  </LangProvider>
+  <ErrorBoundary>
+    <LangProvider>
+      <AuthProvider>
+        <QuizProvider>
+          <HashRouter>
+            <AppLayout />
+          </HashRouter>
+        </QuizProvider>
+      </AuthProvider>
+    </LangProvider>
+  </ErrorBoundary>
 );
 
 export default App;
