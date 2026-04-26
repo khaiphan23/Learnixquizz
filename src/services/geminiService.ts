@@ -290,43 +290,153 @@ const CHARS_PER_CHUNK = 5_000;
  * `globalOffset` = how many questions we've already extracted (for ordering context).
  */
 function buildExtractionPrompt(chunk: string, globalOffset: number): string {
-  return `You are a quiz extraction engine. Extract EVERY question from the text below into a JSON array.
+  return `You are a STRICT quiz extraction engine. Your job is to extract questions from raw document text into a PERFECT structured JSON array.
 
-RULES (NON-NEGOTIABLE):
-1. Extract ALL questions — do NOT skip, merge, or reorder any.
-2. Copy question text EXACTLY as written — do not paraphrase or fix grammar.
-3. The first question in this chunk is approximately question #${globalOffset + 1} in the document.
-4. For each question, set "docOrder" to its sequential position in the FULL document (starting from ${globalOffset + 1}).
-5. Determine "type":
-   - "multiple-choice" if it has options A B C D (exactly 4)
-   - "true-false" if it has 2 options (True/False, Đúng/Sai, etc.)
-   - "essay" for everything else (open-ended, fill-blank, transformation, word-form)
-6. For "correctAnswerIndex": use 0 UNLESS a marker explicitly indicates the answer
-   (markers: "Đáp án:", "Answer:", "Key:", asterisk (*), checkmark ✓, →text←).
-   NEVER guess or infer the answer.
-7. options must be the option body text only (exclude "A.", "B." prefix).
-8. For essay: options = [], sampleAnswer = "" (do not invent).
-9. Ignore headers, instructions, and section titles that are not questions.
+You MUST preserve 100% of the original content. NO data loss is allowed.
 
-OUTPUT — return ONLY valid JSON, absolutely nothing else:
+━━━━━━━━━━━━━━━━━━━
+CRITICAL RULES (NON-NEGOTIABLE)
+━━━━━━━━━━━━━━━━━━━
+
+1. DO NOT SKIP ANY QUESTION
+- Every detected question MUST appear in output
+- Do NOT merge multiple questions into one
+- Do NOT split one question into multiple
+
+2. DO NOT LOSE STRUCTURE
+Each question MUST have:
+- text (FULL question, not truncated)
+- type (correct classification)
+- options (if exist)
+→ It is FORBIDDEN to return:
+- question without text
+- options without question
+- partial data
+
+3. DO NOT PARAPHRASE
+- Copy EXACT original text
+- Keep line breaks if needed
+
+━━━━━━━━━━━━━━━━━━━
+QUESTION BOUNDARY DETECTION
+━━━━━━━━━━━━━━━━━━━
+
+A new question starts when a line matches:
+- "1.", "2)", "3:"
+- "Câu 1.", "Câu 2:"
+- "Question 1"
+
+Everything until the next question belongs to that question.
+
+━━━━━━━━━━━━━━━━━━━
+TYPE CLASSIFICATION (STRICT LOGIC)
+━━━━━━━━━━━━━━━━━━━
+
+You MUST follow this priority:
+
+1. MULTIPLE-CHOICE
+If the question contains ANY of:
+- A. B. C. D.
+- A) B) C) D)
+- a. b. c. d.
+
+→ type = "multiple-choice"
+→ Extract ALL options (minimum 2, usually 4)
+→ NEVER classify this as essay
+
+2. TRUE-FALSE
+If there are EXACTLY 2 options like:
+- True / False
+- Đúng / Sai
+
+→ type = "true-false"
+
+3. ESSAY
+Only when:
+- NO options exist
+
+→ type = "essay"
+
+🚨 IMPORTANT:
+Presence of A/B/C/D ALWAYS overrides everything → must be multiple-choice
+
+━━━━━━━━━━━━━━━━━━━
+OPTION EXTRACTION RULES
+━━━━━━━━━━━━━━━━━━━
+
+- Remove prefix: "A.", "B)", etc.
+- Keep ONLY option content
+- Keep order exactly as in text
+
+If options exist:
+→ options MUST NOT be empty
+
+If no options:
+→ options = []
+
+━━━━━━━━━━━━━━━━━━━
+ANSWER DETECTION
+━━━━━━━━━━━━━━━━━━━
+
+Only set correctAnswerIndex if explicitly marked:
+
+Valid markers:
+- "Đáp án: A"
+- "Answer: B"
+- "*", "✓", "→ ←"
+
+If no marker:
+→ correctAnswerIndex = 0
+
+NEVER GUESS
+
+━━━━━━━━━━━━━━━━━━━
+MULTI-LINE HANDLING
+━━━━━━━━━━━━━━━━━━━
+
+- Questions may span multiple lines
+- Options may be on separate lines
+→ MUST merge them correctly
+
+━━━━━━━━━━━━━━━━━━━
+ANTI-ERROR VALIDATION (VERY IMPORTANT)
+━━━━━━━━━━━━━━━━━━━
+
+Before returning JSON, you MUST check:
+
+For EACH question:
+- text is NOT empty
+- If type = multiple-choice → options.length ≥ 2
+- If options exist → type MUST NOT be essay
+
+If any error:
+→ FIX it before output
+
+━━━━━━━━━━━━━━━━━━━
+OUTPUT FORMAT (STRICT JSON ONLY)
+━━━━━━━━━━━━━━━━━━━
+
+Return ONLY JSON array, NO markdown, NO explanation:
+
 [
   {
-    "docOrder": <number>,
+    "docOrder": ${globalOffset + 1},
     "type": "multiple-choice" | "true-false" | "essay",
-    "text": "<exact question text including its number>",
-    "options": ["<option A>", "<option B>", "<option C>", "<option D>"],
+    "text": "<FULL question text>",
+    "options": ["..."],
     "correctAnswerIndex": 0,
     "explanation": "",
     "sampleAnswer": ""
   }
 ]
 
-TEXT TO PROCESS:
----
-${chunk}
----
+━━━━━━━━━━━━━━━━━━━
+TEXT TO PROCESS
+━━━━━━━━━━━━━━━━━━━
 
-JSON array:`;
+${chunk}
+
+JSON:`;
 }
 
 /**
