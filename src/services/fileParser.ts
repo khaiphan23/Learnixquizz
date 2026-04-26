@@ -188,30 +188,42 @@ export async function parsePdf(file: File): Promise<string> {
     // Lấy text content
     const textContent = await page.getTextContent();
 
-    // Render page thành canvas để phân tích màu sắc
-    const viewport = page.getViewport({ scale: 2.0 }); // Scale cao để nhận diện tốt hơn
-    const canvas = document.createElement('canvas');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext('2d');
+    // Sắp xếp text items theo vị trí Y (top to bottom) rồi X (left to right)
+    const items = textContent.items
+      .filter((item: any) => item.str?.trim())
+      .map((item: any) => ({
+        text: item.str,
+        x: item.transform[4],
+        y: item.transform[5],
+        height: item.height || 12,
+      }))
+      .sort((a: any, b: any) => {
+        // Group by lines (Y position within threshold)
+        const yThreshold = Math.max(a.height, b.height) * 0.5;
+        if (Math.abs(a.y - b.y) > yThreshold) {
+          return b.y - a.y; // Sort by Y descending (top to bottom)
+        }
+        return a.x - b.x; // Same line: sort by X ascending
+      });
 
-    if (ctx) {
-      // Render PDF page lên canvas
-      await page.render({
-        canvasContext: ctx,
-        viewport: viewport,
-        canvas: canvas,
-      } as any).promise;
+    // Reconstruct text with proper line breaks
+    let pageText = '';
+    let lastY: number | null = null;
+    const lineThreshold = 5; // Threshold for detecting new line
 
-      // Phân tích màu sắc và đánh dấu text có màu đặc biệt
-      const markedTexts = analyzeCanvasColors(canvas, textContent.items);
-      const pageText = markedTexts.join(' ');
-      textParts.push(pageText);
-    } else {
-      // Fallback nếu không render được canvas
-      const pageText = textContent.items.map((item) => ('str' in item ? item.str : '')).join(' ');
-      textParts.push(pageText);
+    for (const item of items) {
+      if (lastY !== null && Math.abs(item.y - lastY) > lineThreshold) {
+        pageText += '\n'; // New line detected
+      } else if (lastY !== null && !pageText.endsWith('\n') && !pageText.endsWith(' ')) {
+        // Same line, add space if needed
+        const needsSpace = !item.text.startsWith(' ') && !pageText.endsWith(' ');
+        if (needsSpace) pageText += ' ';
+      }
+      pageText += item.text;
+      lastY = item.y;
     }
+
+    textParts.push(pageText);
   }
 
   return textParts.join('\n\n');

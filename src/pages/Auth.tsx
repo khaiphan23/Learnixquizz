@@ -37,7 +37,7 @@ const Logo: React.FC = () => (
     <div className="w-14 h-14 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-200 dark:shadow-indigo-900">
       <BookOpen className="h-7 w-7 text-white" />
     </div>
-    <span className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">EduQuiz</span>
+    <span className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">LearnixQuizz</span>
   </div>
 );
 

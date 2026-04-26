@@ -6,6 +6,7 @@ import { useLang } from '../store/LangContext';
 import { Button, Input, Select, Textarea, Card } from '../components/ui';
 import { generateQuizAI, generateQuestionsFromContent } from '../services/geminiService';
 import { extractTextFromFile } from '../services/fileParser';
+import { uploadImage, fileToBase64 } from '../services/imageUploadService';
 import { Question, Quiz } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { PlusCircle, Sparkles, Trash2, ChevronDown, ChevronUp, Image, Upload, FileText, Clipboard } from 'lucide-react';
@@ -49,8 +50,50 @@ export const CreateQuiz: React.FC = () => {
   const [isExtracting, setIsExtracting] = useState(false);
   const [genError, setGenError] = useState('');
   const [showPreview, setShowPreview] = useState(false);
+  
+  // Image upload states per question
+  const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({});
+  const [imageErrors, setImageErrors] = useState<Record<string, string>>({});
 
   if (!user) { navigate('/login'); return null; }
+  
+  // Handle image upload for a question
+  const handleImageUpload = async (idx: number, file: File) => {
+    const questionId = questions[idx]?.id;
+    if (!questionId || !user) return;
+    
+    setUploadingImages(prev => ({ ...prev, [questionId]: true }));
+    setImageErrors(prev => ({ ...prev, [questionId]: '' }));
+    
+    try {
+      // Validate file
+      if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)) {
+        throw new Error('Chỉ chấp nhận file: JPG, PNG, GIF, WebP');
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        throw new Error('File quá lớn (tối đa 5MB)');
+      }
+      
+      // Upload to Supabase
+      const { url } = await uploadImage(file, user.id);
+      
+      // Update question with image URL
+      updateQuestion(idx, { imageUrl: url });
+    } catch (error: any) {
+      console.error('[handleImageUpload] Error:', error);
+      setImageErrors(prev => ({ ...prev, [questionId]: error.message }));
+    } finally {
+      setUploadingImages(prev => ({ ...prev, [questionId]: false }));
+    }
+  };
+  
+  // Handle image file selection
+  const handleImageFileChange = (idx: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleImageUpload(idx, file);
+    }
+  };
 
   const updateQuestion = (idx: number, updates: Partial<Question>) => {
     setQuestions(prev => prev.map((q, i) => i === idx ? { ...q, ...updates } : q));
@@ -429,15 +472,58 @@ export const CreateQuiz: React.FC = () => {
             {!collapsed[q.id] && (
               <div className="space-y-3">
                 <Textarea value={q.text} onChange={e => updateQuestion(idx, { text: e.target.value })} placeholder={lang === 'vi' ? 'Nội dung câu hỏi...' : 'Question text...'} rows={2} />
-                <div className="flex gap-2">
-                  <Image className="h-4 w-4 text-slate-400 mt-2.5 flex-shrink-0" />
-                  <input value={q.imageUrl ?? ''} onChange={e => updateQuestion(idx, { imageUrl: e.target.value || undefined })}
-                    placeholder={t.imageUrl}
-                    className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <div className="space-y-2">
+                  {/* Image source tabs */}
+                  <div className="flex gap-2 mb-2">
+                    <span className="text-xs text-slate-500 dark:text-slate-400 pt-1">{t.image || (lang === 'vi' ? 'Hình ảnh:' : 'Image:')}</span>
+                    <label className="flex items-center gap-1 px-2 py-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg text-xs cursor-pointer hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors">
+                      <Upload className="h-3 w-3" />
+                      {t.uploadImage}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/gif,image/webp"
+                        onChange={e => handleImageFileChange(idx, e)}
+                        className="hidden"
+                        disabled={uploadingImages[q.id]}
+                      />
+                    </label>
+                    <span className="text-xs text-slate-400 pt-1">{t.or}</span>
+                  </div>
+                  
+                  {/* URL input */}
+                  <div className="flex gap-2">
+                    <Image className="h-4 w-4 text-slate-400 mt-2.5 flex-shrink-0" />
+                    <input value={q.imageUrl ?? ''} onChange={e => updateQuestion(idx, { imageUrl: e.target.value || undefined })}
+                      placeholder={t.imageUrl || (lang === 'vi' ? 'URL hình ảnh...' : 'Image URL...')}
+                      className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                  
+                  {/* Error message */}
+                  {imageErrors[q.id] && (
+                    <p className="text-xs text-red-500">{imageErrors[q.id]}</p>
+                  )}
+                  
+                  {/* Loading indicator */}
+                  {uploadingImages[q.id] && (
+                    <p className="text-xs text-indigo-500 flex items-center gap-1">
+                      <span className="animate-spin">⏳</span> {t.uploading}
+                    </p>
+                  )}
                 </div>
-                {q.imageUrl && (
-                  <img src={q.imageUrl} alt="preview" className="rounded-xl max-h-48 object-cover border border-slate-200 dark:border-slate-600"
-                    onError={e => (e.currentTarget.style.display = 'none')} />
+                
+                {/* Image preview */}
+                {q.imageUrl && !uploadingImages[q.id] && (
+                  <div className="relative">
+                    <img src={q.imageUrl} alt="preview" className="rounded-xl max-h-48 object-cover border border-slate-200 dark:border-slate-600"
+                      onError={e => (e.currentTarget.style.display = 'none')} />
+                    <button
+                      onClick={() => updateQuestion(idx, { imageUrl: undefined })}
+                      className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
+                      title={t.removeImage}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 )}
                 {q.type !== 'essay' ? (
                   <div className="space-y-2">

@@ -65,7 +65,7 @@ const AppLayout: React.FC = () => {
         <span className="text-white text-2xl font-black">E</span>
       </div>
       <Spinner size="lg" />
-      <p className="text-slate-400 dark:text-slate-500 text-sm font-medium">EduQuiz</p>
+      <p className="text-slate-400 dark:text-slate-500 text-sm font-medium">LearnixQuizz</p>
     </div>
   );
 
