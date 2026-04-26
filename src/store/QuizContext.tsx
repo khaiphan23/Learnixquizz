@@ -93,7 +93,7 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     };
     fetchUserData();
-  }, [user?.id, user, authLoading]);
+  }, [user?.id, authLoading]);
 
   // FIX LỖI 2: addQuiz giờ dùng optimistic update — thêm vào state TRƯỚC khi insert
   // Nếu insert lỗi thì rollback. Không cần chờ DB để UI cập nhật ngay.
