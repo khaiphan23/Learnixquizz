@@ -1,10 +1,10 @@
 // File Parser Service - Extract text from .txt, .pdf, .docx files with color detection
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 function validateFile(file: File): void {
   if (file.size > MAX_FILE_SIZE) {
-    throw new Error(`File quá lớn (tối đa 10MB). File hiện tại: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
+    throw new Error(`File quá lớn (tối đa 50MB). File hiện tại: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
   }
 }
 
