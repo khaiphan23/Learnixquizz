@@ -188,8 +188,8 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     console.log('[editQuiz] Upserting quiz:', updatedQuiz.id, 'Questions:', updatedQuiz.questions.length);
     const startTime = Date.now();
     
-    // Thêm timeout 60s
-    const timeoutMs = 60000;
+    // Thêm timeout 120s cho quiz lớn, 60s cho quiz nhỏ
+    const timeoutMs = updatedQuiz.questions.length > 50 ? 120000 : 60000;
     const timeoutPromise = new Promise((_, reject) => 
       setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
     );
