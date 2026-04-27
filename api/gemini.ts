@@ -12,7 +12,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
     if (!GEMINI_API_KEY) {
       console.error('[Gemini API] Thiếu GEMINI_API_KEY');
-      return response.status(500).json({ error: 'Server configuration error' });
+      return response.status(500).json({ 
+        error: 'Thiếu GEMINI_API_KEY trong biến môi trường. Vui lòng thêm GEMINI_API_KEY vào Vercel Environment Variables.'
+      });
     }
 
     // Sử dụng chính xác danh sách model theo yêu cầu của người dùng

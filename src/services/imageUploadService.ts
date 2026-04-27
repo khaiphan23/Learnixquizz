@@ -56,13 +56,44 @@ export async function uploadImage(file: File, userId: string): Promise<UploadRes
     
     if (error) {
       console.error('[uploadImage] Upload error:', error);
-      if (error.message?.includes('bucket')) {
-        throw new Error(`Bucket '${BUCKET_NAME}' chưa được tạo trong Supabase. Vui lòng tạo bucket và cấu hình RLS policy.`);
+      
+      // Check for specific Supabase errors
+      const errorMsg = error.message?.toLowerCase() || '';
+      const errorCode = (error as any).code || '';
+      
+      if (errorMsg.includes('bucket') || errorCode === 'PGRST301' || errorCode === '404') {
+        throw new Error(
+          `Bucket '${BUCKET_NAME}' chưa được tạo trong Supabase.\n\n` +
+          `Hướng dẫn khắc phục:\n` +
+          `1. Vào Supabase Dashboard → Storage\n` +
+          `2. Click "New bucket"\n` +
+          `3. Tên: ${BUCKET_NAME}\n` +
+          `4. Bật "Public bucket"\n` +
+          `5. Chạy file supabase-storage-setup.sql trong SQL Editor\n\n` +
+          `Hoặc chạy SQL: INSERT INTO storage.buckets (id, name, public) VALUES ('${BUCKET_NAME}', '${BUCKET_NAME}', true);`
+        );
       }
-      if (error.message?.includes('row-level security')) {
-        throw new Error(`RLS policy chưa cho phép upload. Vui lòng cấu hình RLS trong Supabase.`);
+      
+      if (errorMsg.includes('row-level security') || errorMsg.includes('rls') || errorCode === '42501') {
+        throw new Error(
+          `RLS policy chưa cho phép upload.\n\n` +
+          `Hướng dẫn khắc phục:\n` +
+          `1. Vào Supabase Dashboard → SQL Editor\n` +
+          `2. Mở file supabase-storage-setup.sql trong project\n` +
+          `3. Chạy toàn bộ SQL để tạo policies\n\n` +
+          `Hoặc chạy:\n` +
+          `CREATE POLICY "Allow authenticated uploads" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = '${BUCKET_NAME}');`
+        );
       }
-      throw new Error(`Lỗi upload: ${error.message}`);
+      
+      if (errorMsg.includes('permission') || errorMsg.includes('unauthorized')) {
+        throw new Error(
+          `Không có quyền upload. Vui lòng đăng nhập lại hoặc kiểm tra RLS policy.\n` +
+          `Xem file supabase-storage-setup.sql để cấu hình.`
+        );
+      }
+      
+      throw new Error(`Lỗi upload: ${error.message || 'Unknown error'}`);
     }
     
     console.log('[uploadImage] Upload success, getting public URL...');

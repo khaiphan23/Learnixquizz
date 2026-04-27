@@ -389,13 +389,16 @@ CRITICAL RULES (NON-NEGOTIABLE)
 
 2. DO NOT LOSE STRUCTURE
 Each question MUST have:
-- text (FULL question, not truncated)
+- text (FULL question text ONLY, NOT including options A/B/C/D)
 - type (correct classification)
-- options (if exist)
+- options (if exist, as separate array)
 → It is FORBIDDEN to return:
 - question without text
 - options without question
 - partial data
+- options included in the text field
+
+🚨 CRITICAL: The "text" field must contain ONLY the question stem, NEVER include options like "A. ... B. ..." inside text
 
 3. DO NOT PARAPHRASE
 - Copy EXACT original text
@@ -459,20 +462,24 @@ If no options:
 → options = []
 
 ━━━━━━━━━━━━━━━━━━━
-ANSWER DETECTION
+ANSWER DETECTION (MUST DO)
 ━━━━━━━━━━━━━━━━━━━
 
-Only set correctAnswerIndex if explicitly marked:
+You MUST find and set correctAnswerIndex:
 
-Valid markers:
-- "Đáp án: A"
-- "Answer: B"
-- "*", "✓", "→ ←"
+1. Look for answer markers in the input:
+   - "Đáp án: A" or "Answer: B" → correctAnswerIndex = 0 (A), 1 (B), 2 (C), 3 (D)
+   - "*", "✓", "→" before/after an option → mark that option as correct
+   - Underline, bold, or highlight on option → that option is correct
 
-If no marker:
-→ correctAnswerIndex = 0
+2. If multiple questions have answers marked, set correctAnswerIndex for EACH question
 
-NEVER GUESS
+3. If NO marker found:
+   → Analyze which option is logically correct
+   → Set correctAnswerIndex to the most likely answer (0, 1, 2, or 3)
+
+🚨 CRITICAL: Every question MUST have correctAnswerIndex set (0, 1, 2, or 3)
+NOT allowed: Leaving all as 0 without checking for markers
 
 ━━━━━━━━━━━━━━━━━━━
 MULTI-LINE HANDLING
@@ -543,15 +550,32 @@ OUTPUT FORMAT (STRICT JSON ONLY)
 
 Return ONLY JSON array, NO markdown, NO explanation:
 
+CORRECT EXAMPLE (text does NOT contain options):
 [
   {
     "docOrder": ${globalOffset + 1},
-    "type": "multiple-choice" | "true-false" | "essay",
-    "text": "<FULL question text>",
-    "options": ["..."],
+    "type": "multiple-choice",
+    "text": "What is the capital of France?",
+    "options": ["Paris", "London", "Berlin", "Madrid"],
     "correctAnswerIndex": 0,
     "explanation": "",
     "sampleAnswer": ""
+  }
+]
+
+❌ WRONG (options mixed in text):
+[
+  {
+    "text": "What is 2+2? A. 3 B. 4 C. 5",
+    "options": ["A. 3", "B. 4", "C. 5"]
+  }
+]
+
+✅ CORRECT (clean separation):
+[
+  {
+    "text": "What is 2+2?",
+    "options": ["3", "4", "5"]
   }
 ]
 

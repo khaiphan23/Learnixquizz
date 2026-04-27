@@ -190,13 +190,22 @@ export const CreateQuiz: React.FC = () => {
 
     try {
       const shortCode = existing?.shortCode ?? Math.random().toString(36).substring(2, 8).toUpperCase();
+      
+      // Ensure each question has a unique ID before saving
+      const processedQuestions = questions.map((q, idx) => ({
+        ...q,
+        id: q.id && q.id.trim() ? q.id : uuidv4(),
+        // Ensure correctAnswerIndex is valid
+        correctAnswerIndex: Math.max(0, Math.min(q.correctAnswerIndex || 0, (q.options?.length || 1) - 1))
+      }));
+      
       const quiz: Quiz = {
         id: existing?.id ?? uuidv4(),
         title: title.trim(),
         description: description.trim(),
         topic: topic.trim() || 'Chung',
         difficulty,
-        questions,
+        questions: processedQuestions,
         createdAt: existing?.createdAt ?? Date.now(),
         author: user.name,
         authorId: user.id,

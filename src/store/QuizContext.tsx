@@ -141,9 +141,9 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         result = await Promise.race([insertPromise, timeoutPromise]) as any;
       } catch (e: any) {
         if (e.message === 'TIMEOUT') {
-          console.log('[addQuiz] Timeout after', timeoutMs, 'ms, waiting for actual result...');
-          result = await insertPromise;
-          console.log('[addQuiz] Operation completed after timeout');
+          console.error('[addQuiz] Timeout after', timeoutMs, 'ms - operation taking too long');
+          // Don't wait for insertPromise - throw error immediately to prevent hanging
+          throw new Error(`Lưu quiz quá chậm (timeout sau ${timeoutMs/1000}s). Vui lòng thử lại hoặc giảm số câu hỏi.`);
         } else {
           throw e;
         }
@@ -153,6 +153,7 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.log('[addQuiz] Insert completed in', duration, 'ms');
       
       if (result?.error) {
+        console.error('[addQuiz] Supabase error:', result.error);
         throw new Error('Lỗi lưu quiz: ' + result.error.message);
       }
     } catch (error: any) {
@@ -177,8 +178,8 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const dataSize = JSON.stringify(row).length;
     console.log('[editQuiz] Data size:', (dataSize / 1024).toFixed(2), 'KB');
     
-    if (dataSize > 1000000) {
-      throw new Error('Quiz quá lớn (>1MB) - vui lòng giảm số câu hỏi hoặc độ dài nội dung');
+    if (dataSize > 2000000) {
+      throw new Error('Quiz quá lớn (>2MB) - vui lòng giảm số câu hỏi hoặc độ dài nội dung');
     }
     
     // Optimistic update
