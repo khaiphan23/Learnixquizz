@@ -48,7 +48,7 @@ async function callGemini(prompt: string, maxTokens = 8192): Promise<string> {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens },
+            generationConfig: { temperature: 0, maxOutputTokens: maxTokens },
           }),
           signal: ctrl.signal,
         }
@@ -116,6 +116,72 @@ function recoverJsonArray(raw: string): unknown[] {
 }
 
 // ─── Validation & normalisation ─────────────────────────────────────────────
+
+/**
+ * Post-process questions to normalize AI output variations
+ * Ensures consistent results across multiple runs
+ */
+function postProcessQuestions(questions: Question[]): Question[] {
+  return questions.map((q, index) => {
+    // Deep clone to avoid mutations
+    const processed = { ...q };
+    
+    // Ensure consistent ID assignment
+    processed.id = q.id || `q-${index}-${Date.now()}`;
+    
+    // Clean up text - remove extra whitespace, normalize newlines
+    processed.text = q.text
+      .replace(/\r\n/g, '\n')
+      .replace(/\n+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    
+    // Remove answer letter from question text (e.g., "A. answer" at end)
+    const answerLetterPattern = /\s*[A-D][\.\)]\s*\S+$/i;
+    processed.text = processed.text.replace(answerLetterPattern, '').trim();
+    
+    // Clean up options
+    if (processed.options && processed.options.length > 0) {
+      processed.options = processed.options.map(opt => 
+        opt.replace(/^\s*[A-D][\.\)]\s*/i, '').trim()
+      );
+      
+      // Remove duplicate options
+      processed.options = [...new Set(processed.options)];
+    }
+    
+    // Ensure type is consistent based on options
+    if (processed.options && processed.options.length >= 2) {
+      const optTexts = processed.options.map(o => o.toLowerCase().trim());
+      const isTrueFalse = processed.options.length === 2 && 
+        (optTexts.includes('true') && optTexts.includes('false'));
+      
+      processed.type = isTrueFalse ? 'true-false' : 'multiple-choice';
+    } else {
+      processed.type = 'essay';
+      processed.options = [];
+      processed.correctAnswerIndex = 0;
+    }
+    
+    // Clamp correctAnswerIndex
+    if (processed.options.length > 0) {
+      processed.correctAnswerIndex = Math.min(
+        Math.max(0, processed.correctAnswerIndex || 0),
+        processed.options.length - 1
+      );
+    }
+    
+    // Clean up explanation and sampleAnswer
+    if (processed.explanation) {
+      processed.explanation = processed.explanation.trim();
+    }
+    if (processed.sampleAnswer) {
+      processed.sampleAnswer = processed.sampleAnswer.trim();
+    }
+    
+    return processed;
+  }).filter(q => q.text.length > 0); // Remove empty questions
+}
 
 function isValidRaw(q: unknown): q is Record<string, unknown> {
   if (!q || typeof q !== 'object') return false;
@@ -692,8 +758,11 @@ export async function generateQuestionsFromContent(
     ` ${deduped.filter(q => q.type === 'essay').length} essay)` 
   );
 
-  // Remove the internal docOrder before returning
-  return deduped.map(({ docOrder: _d, ...q }) => q) as Question[];
+  // Remove the internal docOrder and post-process to normalize
+  const cleaned = deduped.map(({ docOrder: _d, ...q }) => q) as Question[];
+  
+  // Post-process to ensure consistent results
+  return postProcessQuestions(cleaned);
 }
 
 // ─── AI explanation ─────────────────────────────────────────────────────────
