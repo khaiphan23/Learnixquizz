@@ -34,7 +34,14 @@ async function callGemini(prompt: string, maxTokens = 8192): Promise<string> {
     throw new Error('Thiếu VITE_GEMINI_API_KEY — vui lòng kiểm tra biến môi trường');
   }
 
-  const MODELS = ['gemini-3.1-flash', 'gemini-3.1-pro', 'gemini-2.5-pro'];
+  // Use stable Gemini 1.5 models (3.1 and 2.5 are beta/preview with rate limits)
+  const MODELS = [
+  'gemini-3-pro',        // Ưu tiên 1: Thông minh nhất, xử lý logic phức tạp
+  'gemini-3-flash',      // Ưu tiên 2: Cân bằng giữa tốc độ và độ thông minh
+  'gemini-3.1-flash-lite', // Ưu tiên 3: Cực nhanh, quota thường nới lỏng hơn
+  'gemini-2.5-pro',      // Ưu tiên 4: Bản cũ ổn định, dùng làm phương án dự phòng cuối
+  'gemini-2.5-flash'     // Ưu tiên 5: Tốc độ cao, ít tốn tài nguyên
+];
   let lastError = '';
 
   for (const model of MODELS) {
