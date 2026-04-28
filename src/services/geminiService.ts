@@ -119,7 +119,26 @@ function recoverJsonArray(raw: string): unknown[] {
   // Fix trailing commas: ,] or ,}
   text = text.replace(/,\s*([}\]])/g, '$1');
 
-  return JSON.parse(text) as unknown[];
+  // Try to parse, if fails attempt recovery
+  try {
+    return JSON.parse(text) as unknown[];
+  } catch (e: any) {
+    console.error('[recoverJsonArray] Parse failed:', e.message);
+    console.error('[recoverJsonArray] Text preview:', text.slice(0, 200));
+    
+    // Attempt to fix common issues
+    // Remove invalid control chars that might have been missed
+    text = text.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+    
+    // Fix unescaped quotes in strings
+    text = text.replace(/(?<!\\)"(?=\s*[,}\]])/g, '\\"');
+    
+    try {
+      return JSON.parse(text) as unknown[];
+    } catch (e2) {
+      throw new Error(`JSON parse failed: ${e.message}. Text: ${text.slice(0, 100)}...`);
+    }
+  }
 }
 
 // ─── Validation & normalisation ─────────────────────────────────────────────
