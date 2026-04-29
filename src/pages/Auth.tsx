@@ -224,9 +224,10 @@ export const ForgotPassword: React.FC = () => {
     setError('');
     setLoading(true);
 
-    // FIX: dùng origin không có hash, Supabase sẽ append token vào
-    // rồi Supabase redirect về URL này, HashRouter sẽ handle /#/reset-password
+    // FIX: Use current origin for redirect, works for both local and production
+    // Supabase will append token, then HashRouter handles /#/reset-password
     const redirectUrl = `${window.location.origin}/`;
+    console.log('[ForgotPassword] Current origin:', window.location.origin);
     // setDebugUrl(redirectUrl); --- REMOVED FOR LINT
     console.log('[ForgotPassword] redirectTo:', redirectUrl);
 
