@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }
+    .container { max-width: 500px; margin: 0 auto; background: white; border-radius: 12px; padding: 40px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .logo { text-align: center; margin-bottom: 30px; }
+    .logo h1 { color: #4f46e5; font-size: 28px; margin: 0; }
+    h2 { color: #1f2937; font-size: 24px; margin-bottom: 20px; }
+    p { color: #6b7280; font-size: 16px; line-height: 1.6; margin-bottom: 25px; }
+    .button { display: inline-block; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px; }
+    .button:hover { opacity: 0.9; }
+    .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; color: #9ca3af; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">
+      <h1>📚 LearnixQuizz</h1>
+    </div>
+    <h2>Đặt lại mật khẩu</h2>
+    <p>Bạn đã yêu cầu đặt lại mật khẩu cho tài khoản của mình. Click nút bên dưới để tiếp tục:</p>
+    <a href="{{ .ConfirmationURL }}" class="button">Đặt lại mật khẩu</a>
+    <p style="font-size: 14px; color: #9ca3af; margin-top: 20px;">Nếu bạn không yêu cầu điều này, hãy bỏ qua email này.</p>
+    <div class="footer">
+      <p>© 2024 LearnixQuizz - Học tập thông minh cùng AI</p>
+    </div>
+  </div>
+</body>
+</html>
