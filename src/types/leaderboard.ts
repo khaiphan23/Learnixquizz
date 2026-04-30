@@ -6,8 +6,9 @@ export interface QuizPlayCount {
   quizTopic: string;
   authorName: string;
   playCount: number;
-  uniquePlayers: number;
+  uniquePlayers: number | Set<string>;
   averageScore: number;
+  totalScore?: number;
 }
 
 export interface UserQuizCount {
