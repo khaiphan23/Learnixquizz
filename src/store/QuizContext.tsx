@@ -357,57 +357,56 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const fetchMostPlayedQuizzes = useCallback(async (limit = 10): Promise<QuizPlayCount[]> => {
     console.log('[Leaderboard] Fetching most played quizzes...');
     
-    // Get all attempts with quiz info - include both public and private quizzes
-    const { data, error } = await supabase
+    // Get all attempts with basic quiz info
+    const { data: attemptsData, error: attemptsError } = await supabase
       .from('attempts')
-      .select('quiz_id, score, user_id, quiz:quizzes!inner(title, topic, author)')
-      .order('created_at', { ascending: false });
+      .select('quiz_id, score, user_id');
     
-    console.log('[Leaderboard] Raw attempts data:', data?.length || 0, 'records');
-    if (error) console.error('[Leaderboard] Error:', error);
-    
-    if (error || !data || data.length === 0) {
-      console.log('[Leaderboard] No attempts found in database');
+    console.log('[Leaderboard] Attempts count:', attemptsData?.length || 0);
+    if (attemptsError) {
+      console.error('[Leaderboard] Attempts error:', attemptsError);
       return [];
     }
     
-    // Aggregate play counts
-    const quizMap = new Map<string, QuizPlayCount>();
-    
-    for (const row of data) {
-      const quizId = row.quiz_id;
-      const quiz = row.quiz as any;
-      
-      if (!quizMap.has(quizId)) {
-        quizMap.set(quizId, {
-          quizId,
-          quizTitle: quiz?.title || 'Unknown Quiz',
-          quizTopic: quiz?.topic || 'General',
-          authorName: quiz?.author || 'Unknown',
-          playCount: 0,
-          uniquePlayers: new Set<string>(),
-          totalScore: 0
-        });
-      }
-      
-      const stats = quizMap.get(quizId)!;
-      stats.playCount++;
-      stats.totalScore += (row.score || 0);
-      if (row.user_id) (stats.uniquePlayers as Set<string>).add(row.user_id);
+    if (!attemptsData || attemptsData.length === 0) {
+      console.log('[Leaderboard] No attempts in database');
+      return [];
     }
     
-    // Convert to final format
-    const result: QuizPlayCount[] = Array.from(quizMap.entries()).map(([quizId, stats]) => ({
-      quizId,
-      quizTitle: stats.quizTitle,
-      quizTopic: stats.quizTopic,
-      authorName: stats.authorName,
-      playCount: stats.playCount,
-      uniquePlayers: (stats.uniquePlayers as Set<string>).size,
-      averageScore: Math.round(stats.totalScore / stats.playCount)
-    }));
+    // Get all quizzes for mapping
+    const { data: quizzesData } = await supabase.from('quizzes').select('id, title, topic, author');
+    const quizMap = new Map(quizzesData?.map(q => [q.id, q]) || []);
     
-    console.log('[Leaderboard] Processed quizzes:', result.length);
+    // Aggregate by quiz
+    const statsMap = new Map<string, { playCount: number; uniqueUsers: Set<string>; totalScore: number }>();
+    
+    for (const attempt of attemptsData) {
+      const quizId = attempt.quiz_id;
+      if (!statsMap.has(quizId)) {
+        statsMap.set(quizId, { playCount: 0, uniqueUsers: new Set(), totalScore: 0 });
+      }
+      const stats = statsMap.get(quizId)!;
+      stats.playCount++;
+      stats.totalScore += (attempt.score || 0);
+      if (attempt.user_id) stats.uniqueUsers.add(attempt.user_id);
+    }
+    
+    // Build result
+    const result: QuizPlayCount[] = [];
+    for (const [quizId, stats] of statsMap) {
+      const quiz = quizMap.get(quizId);
+      result.push({
+        quizId,
+        quizTitle: quiz?.title || 'Unknown Quiz',
+        quizTopic: quiz?.topic || 'General',
+        authorName: quiz?.author || 'Unknown',
+        playCount: stats.playCount,
+        uniquePlayers: stats.uniqueUsers.size,
+        averageScore: stats.playCount > 0 ? Math.round(stats.totalScore / stats.playCount) : 0
+      });
+    }
+    
+    console.log('[Leaderboard] Result:', result.length, 'quizzes');
     
     return result
       .sort((a, b) => b.playCount - a.playCount)

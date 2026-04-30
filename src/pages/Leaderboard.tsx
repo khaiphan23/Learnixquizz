@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuizStore } from '../store/QuizContext';
 import { useLang } from '../store/LangContext';
-import { Trophy, Users, BookOpen, Crown, Target, Star } from 'lucide-react';
+import { Trophy, Users, BookOpen, Crown, Target, Star, RefreshCw } from 'lucide-react';
 import type { QuizPlayCount, UserQuizCount, CreatorQuizStats } from '../types/leaderboard';
 
 type TabType = 'most-played' | 'active-players' | 'top-creators';
@@ -82,7 +82,10 @@ export const Leaderboard: React.FC = () => {
             disabled={loading}
             className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
           >
-            {loading ? 'Đang tải...' : '🔄 Làm mới dữ liệu'}
+            <span className="flex items-center gap-2">
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              {loading ? 'Đang tải...' : 'Làm mới dữ liệu'}
+            </span>
           </button>
         </div>
 
