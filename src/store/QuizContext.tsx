@@ -417,20 +417,20 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const fetchMostActivePlayers = useCallback(async (limit = 10): Promise<UserQuizCount[]> => {
     console.log('[Leaderboard] Fetching most active players...');
     
+    // Get all attempts - don't filter by user_id to see all data
     const { data, error } = await supabase
       .from('attempts')
-      .select('user_id, user_name, score, quiz_id')
-      .not('user_id', 'is', null)
-      .order('created_at', { ascending: false });
+      .select('user_id, user_name, score, quiz_id');
     
-    console.log('[Leaderboard] Raw user attempts:', data?.length || 0, 'records');
+    console.log('[Leaderboard] Raw attempts for players:', data?.length || 0, 'records');
     if (error) console.error('[Leaderboard] Error:', error);
     
     if (error || !data || data.length === 0) {
-      console.log('[Leaderboard] No user attempts found');
+      console.log('[Leaderboard] No attempts found');
       return [];
     }
     
+    // Group by user_id (use anonymous_xxx as userId if no user_id)
     const userMap = new Map<string, { 
       userId: string; 
       userName: string; 
@@ -441,8 +441,8 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }>();
     
     for (const row of data) {
-      const userId = row.user_id;
-      if (!userId) continue;
+      // Use user_id if available, otherwise use user_name or 'anonymous'
+      const userId = row.user_id || row.user_name || 'anonymous';
       
       if (!userMap.has(userId)) {
         userMap.set(userId, {
@@ -468,11 +468,11 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       userEmail: '',
       quizzesPlayed: stats.quizzes.size,
       totalAttempts: stats.attempts,
-      averageScore: Math.round(stats.totalScore / stats.attempts),
+      averageScore: stats.attempts > 0 ? Math.round(stats.totalScore / stats.attempts) : 0,
       bestScore: stats.bestScore
     }));
     
-    console.log('[Leaderboard] Processed users:', result.length);
+    console.log('[Leaderboard] Processed players:', result.length, result);
     
     return result
       .sort((a, b) => b.totalAttempts - a.totalAttempts)
