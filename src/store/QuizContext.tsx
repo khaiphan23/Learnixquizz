@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '../services/supabase';
 import { Quiz, QuizAttempt } from '../types';
+import type { QuizPlayCount, UserQuizCount, CreatorQuizStats } from '../types/leaderboard';
 import { useAuth } from './AuthContext';
 
 function dbToQuiz(row: any): Quiz {
@@ -62,6 +63,10 @@ interface QuizContextType {
   getAllAttemptsForQuiz: (quizId: string) => QuizAttempt[];
   fetchAttemptsForQuiz: (quizId: string) => Promise<QuizAttempt[]>;
   isLoading: boolean;
+  // Leaderboard/Ranking functions
+  fetchMostPlayedQuizzes: (limit?: number) => Promise<QuizPlayCount[]>;
+  fetchMostActivePlayers: (limit?: number) => Promise<UserQuizCount[]>;
+  fetchTopCreators: (limit?: number) => Promise<CreatorQuizStats[]>;
 }
 
 const QuizContext = createContext<QuizContextType | undefined>(undefined);
@@ -348,6 +353,181 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return (data ?? []).map(dbToAttempt);
   }, []);
 
+  // Leaderboard: Most played quizzes
+  const fetchMostPlayedQuizzes = useCallback(async (limit = 10): Promise<QuizPlayCount[]> => {
+    const { data, error } = await supabase
+      .from('attempts')
+      .select('quiz_id, quiz:quiz_id (title, topic, author)')
+      .order('created_at', { ascending: false });
+    
+    if (error || !data) return [];
+    
+    // Aggregate play counts
+    const quizMap = new Map<string, QuizPlayCount>();
+    
+    for (const row of data) {
+      const quizId = row.quiz_id;
+      const quiz = row.quiz as any;
+      
+      if (!quizMap.has(quizId)) {
+        quizMap.set(quizId, {
+          quizId,
+          quizTitle: quiz?.title || 'Unknown',
+          quizTopic: quiz?.topic || 'Unknown',
+          authorName: quiz?.author || 'Unknown',
+          playCount: 0,
+          uniquePlayers: 0,
+          averageScore: 0
+        });
+      }
+      
+      const stats = quizMap.get(quizId)!;
+      stats.playCount++;
+    }
+    
+    // Get unique players and scores
+    const quizIds = Array.from(quizMap.keys());
+    for (const quizId of quizIds) {
+      const { data: attemptData } = await supabase
+        .from('attempts')
+        .select('user_id, score')
+        .eq('quiz_id', quizId);
+      
+      if (attemptData) {
+        const uniqueUsers = new Set(attemptData.map(a => a.user_id)).size;
+        const avgScore = attemptData.reduce((sum, a) => sum + (a.score || 0), 0) / attemptData.length;
+        
+        const stats = quizMap.get(quizId)!;
+        stats.uniquePlayers = uniqueUsers;
+        stats.averageScore = Math.round(avgScore);
+      }
+    }
+    
+    return Array.from(quizMap.values())
+      .sort((a, b) => b.playCount - a.playCount)
+      .slice(0, limit);
+  }, []);
+
+  // Leaderboard: Most active players
+  const fetchMostActivePlayers = useCallback(async (limit = 10): Promise<UserQuizCount[]> => {
+    const { data, error } = await supabase
+      .from('attempts')
+      .select('user_id, user_name, score, quiz_id')
+      .not('user_id', 'is', null)
+      .order('created_at', { ascending: false });
+    
+    if (error || !data) return [];
+    
+    const userMap = new Map<string, UserQuizCount>();
+    
+    for (const row of data) {
+      const userId = row.user_id;
+      if (!userId) continue;
+      
+      if (!userMap.has(userId)) {
+        userMap.set(userId, {
+          userId,
+          userName: row.user_name || 'Anonymous',
+          userEmail: '',
+          quizzesPlayed: 0,
+          totalAttempts: 0,
+          averageScore: 0,
+          bestScore: 0
+        });
+      }
+      
+      const stats = userMap.get(userId)!;
+      stats.totalAttempts++;
+      stats.bestScore = Math.max(stats.bestScore, row.score || 0);
+    }
+    
+    // Count unique quizzes per user
+    for (const [userId, stats] of userMap) {
+      const { data: userAttempts } = await supabase
+        .from('attempts')
+        .select('quiz_id, score')
+        .eq('user_id', userId);
+      
+      if (userAttempts) {
+        const uniqueQuizzes = new Set(userAttempts.map(a => a.quiz_id)).size;
+        const avgScore = userAttempts.reduce((sum, a) => sum + (a.score || 0), 0) / userAttempts.length;
+        
+        stats.quizzesPlayed = uniqueQuizzes;
+        stats.averageScore = Math.round(avgScore);
+      }
+    }
+    
+    return Array.from(userMap.values())
+      .sort((a, b) => b.totalAttempts - a.totalAttempts)
+      .slice(0, limit);
+  }, []);
+
+  // Leaderboard: Top creators
+  const fetchTopCreators = useCallback(async (limit = 10): Promise<CreatorQuizStats[]> => {
+    // Get all public quizzes with their authors
+    const { data: quizzesData, error } = await supabase
+      .from('quizzes')
+      .select('author_id, author, is_public')
+      .eq('is_public', true);
+    
+    if (error || !quizzesData) return [];
+    
+    const creatorMap = new Map<string, CreatorQuizStats>();
+    
+    for (const quiz of quizzesData) {
+      const authorId = quiz.author_id;
+      if (!authorId) continue;
+      
+      if (!creatorMap.has(authorId)) {
+        creatorMap.set(authorId, {
+          userId: authorId,
+          userName: quiz.author || 'Unknown',
+          userEmail: '',
+          quizzesCreated: 0,
+          totalPlays: 0,
+          uniquePlayers: 0,
+          averageRating: 0
+        });
+      }
+      
+      creatorMap.get(authorId)!.quizzesCreated++;
+    }
+    
+    // Get play stats for each creator's quizzes
+    for (const [authorId, stats] of creatorMap) {
+      const { data: creatorQuizzes } = await supabase
+        .from('quizzes')
+        .select('id')
+        .eq('author_id', authorId)
+        .eq('is_public', true);
+      
+      if (!creatorQuizzes) continue;
+      
+      const quizIds = creatorQuizzes.map(q => q.id);
+      let totalPlays = 0;
+      let uniqueUsers = new Set<string>();
+      
+      for (const quizId of quizIds) {
+        const { data: attempts } = await supabase
+          .from('attempts')
+          .select('user_id')
+          .eq('quiz_id', quizId);
+        
+        if (attempts) {
+          totalPlays += attempts.length;
+          attempts.forEach(a => { if (a.user_id) uniqueUsers.add(a.user_id); });
+        }
+      }
+      
+      stats.totalPlays = totalPlays;
+      stats.uniquePlayers = uniqueUsers.size;
+    }
+    
+    return Array.from(creatorMap.values())
+      .sort((a, b) => b.totalPlays - a.totalPlays)
+      .slice(0, limit);
+  }, []);
+
   return (
     <QuizContext.Provider value={{
       quizzes, attempts, addQuiz, editQuiz, deleteQuiz, restoreQuiz,
@@ -355,6 +535,7 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       getPublicQuizzes, importQuiz, addAttempt, updateAttempt,
       getQuiz, getQuizByShortCode, fetchQuizById, publishQuiz,
       getAllAttemptsForQuiz, fetchAttemptsForQuiz, isLoading,
+      fetchMostPlayedQuizzes, fetchMostActivePlayers, fetchTopCreators,
     }}>
       {children}
     </QuizContext.Provider>

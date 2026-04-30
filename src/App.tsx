@@ -14,6 +14,7 @@ import { QuizResult } from './pages/QuizResult';
 import { Library, Settings } from './pages/LibrarySettings';
 import { ResetPassword } from './pages/ResetPassword';
 import { QuizStats } from './pages/QuizStats';
+import { Leaderboard } from './pages/Leaderboard';
 import { Spinner } from './components/ui';
 import { supabase } from './services/supabase';
 
@@ -81,7 +82,7 @@ const AppLayout: React.FC = () => {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/library" element={<Library />} />
-          <Route path="/leaderboard" element={<div className="max-w-4xl mx-auto px-4 py-10"><h1 className="text-2xl font-bold">Bảng xếp hạng</h1><p className="text-slate-500 mt-4">Tính năng đang phát triển...</p></div>} />
+          <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/quiz/:id" element={<TakeQuiz />} />
           <Route path="/result/:id" element={<QuizResult />} />
           <Route path="/my-quizzes" element={<ProtectedRoute><MyQuizzes /></ProtectedRoute>} />

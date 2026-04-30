@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
 import { useLang } from '../store/LangContext';
-import { BookOpen, Home, Library, Settings, LogOut, Menu, X, PlusCircle, Globe, Moon, Sun } from 'lucide-react';
+import { BookOpen, Home, Library, Trophy, Settings, LogOut, Menu, X, PlusCircle, Globe, Moon, Sun } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const { user, logout } = useAuth();
@@ -37,6 +37,7 @@ export const Navbar: React.FC = () => {
         <div className="hidden md:flex items-center gap-1">
           {navLink('/', t.home, <Home className="h-4 w-4" />)}
           {navLink('/library', t.library, <Library className="h-4 w-4" />)}
+          {navLink('/leaderboard', 'Bảng xếp hạng', <Trophy className="h-4 w-4" />)}
           {user && navLink('/my-quizzes', t.myQuizzes, <BookOpen className="h-4 w-4" />)}
         </div>
 
