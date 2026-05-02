@@ -1,1 +1,1 @@
-# Learixquizz
+# Learnixquizz
