@@ -637,8 +637,19 @@ Format (include docOrder starting at ${globalOffset + 1}):
 
 JSON:`;
 
-  const minimalPrompt = `Extract ALL questions as JSON array from:\n${chunk.slice(0, 3000)}\n
-[{"docOrder":${globalOffset + 1},"type":"multiple-choice","text":"...","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":"","sampleAnswer":""}]`;
+  const minimalPrompt = `Extract ALL questions as JSON array from content.
+
+CRITICAL RULES:
+1. correctAnswerIndex: MUST be 0-3 index of the CORRECT answer in options array
+2. If content shows correct answer (marked with *, bold, or stated), identify which option it is
+3. If answer is "A" → correctAnswerIndex: 0, "B" → 1, "C" → 2, "D" → 3
+4. If answer is text, find which option matches that text
+5. Options MUST be unique strings, not placeholders
+
+Example: If answer is "Paris" and options are ["Paris", "London", "Berlin", "Madrid"], correctAnswerIndex is 0
+
+Extract from:\n${chunk.slice(0, 3000)}\n
+JSON format: [{"docOrder":${globalOffset + 1},"type":"multiple-choice","text":"...","options":["A","B","C","D"],"correctAnswerIndex":0,"explanation":"","sampleAnswer":""}]`;
 
   const prompts = [
     buildExtractionPrompt(chunk, globalOffset),

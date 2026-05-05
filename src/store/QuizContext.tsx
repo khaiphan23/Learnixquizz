@@ -207,10 +207,8 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       result = await Promise.race([upsertPromise, timeoutPromise]) as any;
     } catch (e: any) {
       if (e.message === 'TIMEOUT') {
-        // Timeout xảy ra - đợi thêm để xem operation có hoàn thành không
-        console.log('[editQuiz] Timeout after', timeoutMs, 'ms, waiting for actual result...');
-        result = await upsertPromise;
-        console.log('[editQuiz] Operation actually completed after timeout');
+        console.error('[editQuiz] Timeout after', timeoutMs, 'ms - throwing error immediately');
+        throw new Error(`Lưu quiz quá chậm (timeout sau ${timeoutMs/1000}s). Vui lòng thử lại.`);
       } else {
         throw e;
       }
