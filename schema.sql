@@ -119,6 +119,11 @@ CREATE POLICY "Quiz authors can view all attempts for their quiz"
     )
   );
 
+-- Policy for leaderboard - allow viewing all attempts
+CREATE POLICY "Anyone can view all attempts for leaderboard"
+  ON public.attempts FOR SELECT
+  USING (TRUE);
+
 CREATE POLICY "Users can update their own attempts"
   ON public.attempts FOR UPDATE
   USING (user_id = auth.uid()::text);
