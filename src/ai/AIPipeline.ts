@@ -47,8 +47,16 @@ class AIPipeline {
   private activeJobId: string | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private listeners: Set<(jobs: AIJob[]) => void> = new Set();
+  private initialized = false;
 
   constructor() {
+    // Lazy initialization - don't access browser APIs here
+  }
+
+  initialize(): void {
+    if (this.initialized || typeof window === 'undefined') return;
+    this.initialized = true;
+    
     this.hydrateFromStorage();
     this.startHeartbeat();
     this.startQueueProcessor();
@@ -56,6 +64,8 @@ class AIPipeline {
 
   // Submit new AI job
   async submit(jobSpec: Omit<AIJob, 'id' | 'status' | 'progress' | 'retryCount' | 'createdAt'>): Promise<AIJob> {
+    this.initialize();
+    
     const id = `${jobSpec.type}-${jobSpec.entityId}-${Date.now()}`;
     
     // Check for duplicates
@@ -384,28 +394,66 @@ class AIPipeline {
 
   // Public API
   getJobs(): AIJob[] {
+    this.initialize();
     return Array.from(this.jobs.values());
   }
 
   getJob(id: string): AIJob | undefined {
+    this.initialize();
     return this.jobs.get(id);
   }
 
   subscribe(listener: (jobs: AIJob[]) => void): () => void {
+    this.initialize();
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
+
+  destroy(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+  }
 }
 
-export const aiPipeline = new AIPipeline();
+// Lazy singleton
+let aiPipelineInstance: AIPipeline | null = null;
+
+function getAIPipeline(): AIPipeline {
+  if (!aiPipelineInstance && typeof window !== 'undefined') {
+    aiPipelineInstance = new AIPipeline();
+    aiPipelineInstance.initialize();
+  }
+  if (!aiPipelineInstance) {
+    // Dummy for SSR
+    return {
+      submit: async (spec: any) => ({ ...spec, id: 'ssr', status: 'pending', progress: 0, retryCount: 0, createdAt: Date.now() } as AIJob),
+      cancel: async () => false,
+      getJobs: () => [],
+      getJob: () => undefined,
+      subscribe: () => () => {},
+      destroy: () => {},
+      initialize: () => {},
+    } as AIPipeline;
+  }
+  return aiPipelineInstance;
+}
+
+export const aiPipeline = new Proxy({} as AIPipeline, {
+  get(target, prop) {
+    return (getAIPipeline() as any)[prop];
+  },
+});
 
 export function useAIPipeline() {
+  const pipeline = getAIPipeline();
   return {
     submit: (spec: Omit<AIJob, 'id' | 'status' | 'progress' | 'retryCount' | 'createdAt'>) =>
-      aiPipeline.submit(spec),
-    cancel: (id: string) => aiPipeline.cancel(id),
-    getJobs: () => aiPipeline.getJobs(),
-    getJob: (id: string) => aiPipeline.getJob(id),
-    subscribe: (cb: (jobs: AIJob[]) => void) => aiPipeline.subscribe(cb),
+      pipeline.submit(spec),
+    cancel: (id: string) => pipeline.cancel(id),
+    getJobs: () => pipeline.getJobs(),
+    getJob: (id: string) => pipeline.getJob(id),
+    subscribe: (cb: (jobs: AIJob[]) => void) => pipeline.subscribe(cb),
   };
 }

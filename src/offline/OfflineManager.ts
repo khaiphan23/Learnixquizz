@@ -15,24 +15,38 @@ interface OfflineState {
 }
 
 class OfflineManager {
-  private state: OfflineState = {
-    isOnline: navigator.onLine,
-    lastOnlineAt: navigator.onLine ? Date.now() : null,
-    lastOfflineAt: navigator.onLine ? null : Date.now(),
-    pendingMutations: 0,
-  };
-
+  private state: OfflineState;
   private listeners: Set<(state: OfflineState) => void> = new Set();
   private reconnectHandlers: Set<() => Promise<void>> = new Set();
+  private checkInterval: NodeJS.Timeout | null = null;
+  private initialized = false;
 
   constructor() {
-    if (typeof window === 'undefined') return;
+    // Initialize state lazily
+    this.state = {
+      isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+      lastOnlineAt: typeof navigator !== 'undefined' && navigator.onLine ? Date.now() : null,
+      lastOfflineAt: typeof navigator !== 'undefined' && !navigator.onLine ? Date.now() : null,
+      pendingMutations: 0,
+    };
+  }
+
+  initialize(): void {
+    if (this.initialized || typeof window === 'undefined') return;
+    this.initialized = true;
 
     window.addEventListener('online', () => this.handleOnline());
     window.addEventListener('offline', () => this.handleOffline());
 
     // Periodic sync check
-    setInterval(() => this.checkConnection(), 30000);
+    this.checkInterval = setInterval(() => this.checkConnection(), 30000);
+  }
+
+  destroy(): void {
+    if (this.checkInterval) {
+      clearInterval(this.checkInterval);
+      this.checkInterval = null;
+    }
   }
 
   private handleOnline(): void {
@@ -150,16 +164,45 @@ class OfflineManager {
   }
 }
 
-export const offlineManager = new OfflineManager();
+// Lazy singleton - initialized only when accessed in browser
+let offlineManagerInstance: OfflineManager | null = null;
+
+function getOfflineManager(): OfflineManager {
+  if (!offlineManagerInstance && typeof window !== 'undefined') {
+    offlineManagerInstance = new OfflineManager();
+    offlineManagerInstance.initialize();
+  }
+  if (!offlineManagerInstance) {
+    // Return a dummy for SSR
+    return {
+      isOnline: () => true,
+      isOffline: () => false,
+      getState: () => ({ isOnline: true, lastOnlineAt: null, lastOfflineAt: null, pendingMutations: 0 }),
+      subscribe: () => () => {},
+      onReconnect: () => () => {},
+      queueWhenOffline: async (op: any) => op(),
+      initialize: () => {},
+      destroy: () => {},
+    } as OfflineManager;
+  }
+  return offlineManagerInstance;
+}
+
+export const offlineManager = new Proxy({} as OfflineManager, {
+  get(target, prop) {
+    return (getOfflineManager() as any)[prop];
+  },
+});
 
 export function useOfflineManager() {
+  const manager = getOfflineManager();
   return {
-    isOnline: () => offlineManager.isOnline(),
-    isOffline: () => offlineManager.isOffline(),
-    getState: () => offlineManager.getState(),
-    subscribe: (cb: (state: OfflineState) => void) => offlineManager.subscribe(cb),
-    onReconnect: (handler: () => Promise<void>) => offlineManager.onReconnect(handler),
+    isOnline: () => manager.isOnline(),
+    isOffline: () => manager.isOffline(),
+    getState: () => manager.getState(),
+    subscribe: (cb: (state: OfflineState) => void) => manager.subscribe(cb),
+    onReconnect: (handler: () => Promise<void>) => manager.onReconnect(handler),
     queueWhenOffline: <T>(op: () => Promise<T>, fallback: () => void) =>
-      offlineManager.queueWhenOffline(op, fallback),
+      manager.queueWhenOffline(op, fallback),
   };
 }

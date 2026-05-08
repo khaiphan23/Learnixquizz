@@ -184,14 +184,29 @@ class MutationLog {
 
   private startPersistenceLoop(): void {
     // Periodic cleanup
-    setInterval(() => {
-      this.cleanup();
-    }, 60 * 60 * 1000); // Hourly
+    if (typeof window !== 'undefined') {
+      setInterval(() => {
+        this.cleanup();
+      }, 60 * 60 * 1000); // Hourly
+    }
   }
 }
 
-// Singleton instance
-export const mutationLog = new MutationLog();
+// Lazy singleton instance - only created when accessed in browser
+let mutationLogInstance: MutationLog | null = null;
+
+export const mutationLog = new Proxy({} as MutationLog, {
+  get(target, prop) {
+    if (typeof window === 'undefined') {
+      // Return no-ops for SSR
+      return () => null;
+    }
+    if (!mutationLogInstance) {
+      mutationLogInstance = new MutationLog();
+    }
+    return (mutationLogInstance as any)[prop];
+  },
+});
 
 // Hook for React components
 export function useMutationLog() {

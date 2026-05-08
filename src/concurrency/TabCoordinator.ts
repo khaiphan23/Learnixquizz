@@ -15,21 +15,36 @@ interface TabMessage {
 
 class TabCoordinator {
   private channel: BroadcastChannel | null = null;
-  private tabId: string;
+  private tabId: string | null = null;
   private isLeader = false;
   private leaderId: string | null = null;
   private listeners: Map<string, Set<(payload: any) => void>> = new Map();
   private heartbeatInterval: NodeJS.Timeout | null = null;
+  private initialized = false;
 
   constructor() {
+    // Lazy initialization - don't access browser APIs here
+  }
+
+  initialize(): void {
+    if (this.initialized || typeof window === 'undefined') return;
+    this.initialized = true;
+
     this.tabId = this.generateTabId();
     
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+    if ('BroadcastChannel' in window) {
       this.channel = new BroadcastChannel('learnix_tabs');
       this.setupChannel();
       this.electLeader();
       this.startHeartbeat();
     }
+  }
+
+  private getTabId(): string {
+    if (!this.tabId) {
+      this.tabId = this.generateTabId();
+    }
+    return this.tabId;
   }
 
   private generateTabId(): string {
@@ -50,7 +65,7 @@ class TabCoordinator {
       const { type, payload, tabId, timestamp } = event.data;
 
       // Ignore own messages
-      if (tabId === this.tabId) return;
+      if (tabId === this.getTabId()) return;
 
       switch (type) {
         case 'LEADER_ELECTION':
@@ -80,7 +95,7 @@ class TabCoordinator {
   private electLeader(): void {
     this.broadcast({
       type: 'LEADER_ELECTION',
-      tabId: this.tabId,
+      tabId: this.getTabId(),
       timestamp: Date.now(),
     });
 
@@ -94,7 +109,7 @@ class TabCoordinator {
 
   private handleLeaderElection(otherTabId: string, timestamp: number): void {
     // Lower timestamp wins (older tab is leader)
-    const myTimestamp = parseInt(this.tabId.split('-')[0]);
+    const myTimestamp = parseInt(this.getTabId().split('-')[0]);
     const otherTimestamp = parseInt(otherTabId.split('-')[0]);
 
     if (otherTimestamp < myTimestamp) {
@@ -125,7 +140,7 @@ class TabCoordinator {
         mutationId: payload.context.mutationId,
         success: true,
       },
-      tabId: this.tabId,
+      tabId: this.getTabId(),
       timestamp: Date.now(),
     });
   }
@@ -151,7 +166,7 @@ class TabCoordinator {
       if (this.isLeader) {
         this.broadcast({
           type: 'HEARTBEAT',
-          tabId: this.tabId,
+          tabId: this.getTabId(),
           timestamp: Date.now(),
         });
       }
@@ -172,6 +187,7 @@ class TabCoordinator {
   }
 
   submitMutation(context: MutationContext, operation: string, data: any): void {
+    this.initialize();
     if (this.isLeader || !this.channel) {
       // Execute locally
       return;
@@ -181,16 +197,17 @@ class TabCoordinator {
     this.broadcast({
       type: 'MUTATION_REQUEST',
       payload: { context, operation, data },
-      tabId: this.tabId,
+      tabId: this.getTabId(),
       timestamp: Date.now(),
     });
   }
 
   broadcastCacheInvalidation(keys: string[][]): void {
+    this.initialize();
     this.broadcast({
       type: 'CACHE_INVALIDATE',
       payload: { keys },
-      tabId: this.tabId,
+      tabId: this.getTabId(),
       timestamp: Date.now(),
     });
   }
@@ -211,7 +228,7 @@ class TabCoordinator {
     return {
       isLeader: this.isLeader,
       leaderId: this.leaderId,
-      tabId: this.tabId,
+      tabId: this.getTabId(),
     };
   }
 
@@ -221,17 +238,45 @@ class TabCoordinator {
   }
 }
 
-export const tabCoordinator = new TabCoordinator();
+// Lazy singleton
+let tabCoordinatorInstance: TabCoordinator | null = null;
+
+function getTabCoordinator(): TabCoordinator {
+  if (!tabCoordinatorInstance && typeof window !== 'undefined') {
+    tabCoordinatorInstance = new TabCoordinator();
+    tabCoordinatorInstance.initialize();
+  }
+  if (!tabCoordinatorInstance) {
+    // Dummy for SSR
+    return {
+      shouldExecuteLocally: () => true,
+      submitMutation: () => {},
+      broadcastCacheInvalidation: () => {},
+      subscribe: () => () => {},
+      getStatus: () => ({ isLeader: true, leaderId: null, tabId: 'server' }),
+      destroy: () => {},
+      initialize: () => {},
+    } as TabCoordinator;
+  }
+  return tabCoordinatorInstance;
+}
+
+export const tabCoordinator = new Proxy({} as TabCoordinator, {
+  get(target, prop) {
+    return (getTabCoordinator() as any)[prop];
+  },
+});
 
 export function useTabCoordinator() {
+  const coordinator = getTabCoordinator();
   return {
-    shouldExecuteLocally: () => tabCoordinator.shouldExecuteLocally(),
+    shouldExecuteLocally: () => coordinator.shouldExecuteLocally(),
     submitMutation: (ctx: MutationContext, op: string, data: any) =>
-      tabCoordinator.submitMutation(ctx, op, data),
+      coordinator.submitMutation(ctx, op, data),
     broadcastCacheInvalidation: (keys: string[][]) =>
-      tabCoordinator.broadcastCacheInvalidation(keys),
+      coordinator.broadcastCacheInvalidation(keys),
     subscribe: (event: string, cb: (payload: any) => void) =>
-      tabCoordinator.subscribe(event, cb),
-    getStatus: () => tabCoordinator.getStatus(),
+      coordinator.subscribe(event, cb),
+    getStatus: () => coordinator.getStatus(),
   };
 }
