@@ -34,8 +34,16 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
 
     console.log('[AppProviders] Initializing distributed consistency infrastructure...');
 
+    // Initialize all singletons (lazy initialization pattern)
+    // Force proxy instantiation by accessing a property
+    const _offline = offlineManager.isOnline?.();
+    const _ai = aiPipeline.getJobs?.();
+    const _tab = tabCoordinator.getStatus?.();
+    const _connectivity = connectivityMonitor.getQuality?.();
+    const _pending = mutationReplay.getStatus?.();
+
     // 1. Setup React Query cache invalidation bridge
-    invalidationManager.setQueryClient(queryClient);
+    invalidationManager.setQueryClient?.(queryClient);
 
     // 2. Check for pending mutations and replay AFTER mount
     const checkAndReplay = async () => {
@@ -124,8 +132,8 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
       }
     });
 
-    // 8. Start connectivity monitoring
-    connectivityMonitor.start();
+    // 8. Start connectivity monitoring (already initialized above)
+    // connectivityMonitor is now properly initialized via the proxy
 
     setInitialized(true);
 
@@ -133,11 +141,11 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      unsubscribeOffline();
+      unsubscribeOffline?.();
       unsubscribeTab?.();
       unsubscribeCache?.();
       unsubscribeDiagnostics?.();
-      connectivityMonitor.stop();
+      connectivityMonitor.stop?.();
       if (replayTimeoutRef.current) {
         clearTimeout(replayTimeoutRef.current);
       }

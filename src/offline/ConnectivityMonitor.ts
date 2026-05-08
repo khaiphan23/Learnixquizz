@@ -20,8 +20,16 @@ class ConnectivityMonitor {
 
   private listeners: Set<(quality: ConnectionQuality) => void> = new Set();
   private checkInterval: NodeJS.Timeout | null = null;
+  private initialized = false;
 
   constructor() {
+    // Lazy initialization - don't access browser APIs here
+  }
+
+  initialize(): void {
+    if (this.initialized || typeof window === 'undefined') return;
+    this.initialized = true;
+    
     this.startMonitoring();
   }
 
@@ -33,7 +41,7 @@ class ConnectivityMonitor {
     this.checkQuality();
 
     // Listen for native connection API
-    if ('connection' in navigator) {
+    if (typeof navigator !== 'undefined' && 'connection' in navigator) {
       (navigator as any).connection.addEventListener('change', () => {
         this.checkQuality();
       });
@@ -105,18 +113,45 @@ class ConnectivityMonitor {
     return () => this.listeners.delete(listener);
   }
 
-  destroy(): void {
+  stop(): void {
     this.checkInterval && clearInterval(this.checkInterval);
+    this.checkInterval = null;
   }
 }
 
-export const connectivityMonitor = new ConnectivityMonitor();
+// Lazy singleton
+let connectivityMonitorInstance: ConnectivityMonitor | null = null;
+
+function getConnectivityMonitor(): ConnectivityMonitor {
+  if (!connectivityMonitorInstance && typeof window !== 'undefined') {
+    connectivityMonitorInstance = new ConnectivityMonitor();
+    connectivityMonitorInstance.initialize();
+  }
+  if (!connectivityMonitorInstance) {
+    // Dummy for SSR
+    return {
+      getQuality: () => ({ type: 'online', latencyMs: null, downlinkMbps: null, effectiveType: null }),
+      isSlowConnection: () => false,
+      subscribe: () => () => {},
+      stop: () => {},
+      initialize: () => {},
+    } as ConnectivityMonitor;
+  }
+  return connectivityMonitorInstance;
+}
+
+export const connectivityMonitor = new Proxy({} as ConnectivityMonitor, {
+  get(target, prop) {
+    return (getConnectivityMonitor() as any)[prop];
+  },
+});
 
 export function useConnectivityMonitor() {
+  const monitor = getConnectivityMonitor();
   return {
-    getQuality: () => connectivityMonitor.getQuality(),
-    isSlowConnection: () => connectivityMonitor.isSlowConnection(),
+    getQuality: () => monitor.getQuality(),
+    isSlowConnection: () => monitor.isSlowConnection(),
     subscribe: (cb: (q: ConnectionQuality) => void) =>
-      connectivityMonitor.subscribe(cb),
+      monitor.subscribe(cb),
   };
 }
