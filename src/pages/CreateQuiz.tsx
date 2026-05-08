@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuizStore } from '../store/QuizContext';
 import { useAuth } from '../store/AuthContext';
 import { useLang } from '../store/LangContext';
 import { Button, Input, Select, Textarea, Card } from '../components/ui';
+// INTEGRATION: AI Pipeline for persistent job tracking and recovery
+import { useAIGeneration } from '../hooks/useAIGeneration';
 import { generateQuizAI, generateQuestionsFromContent } from '../services/geminiService';
 import { extractTextFromFile } from '../services/fileParser';
 import { uploadImage, fileToBase64 } from '../services/imageUploadService';
@@ -15,6 +17,9 @@ const emptyQuestion = (): Question => ({
   id: uuidv4(), type: 'multiple-choice', text: '', options: ['', '', '', ''], correctAnswerIndex: 0, explanation: '',
 });
 
+// Generate a unique draft ID for AI job tracking
+const generateDraftId = () => `draft-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
 export const CreateQuiz: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   // FIX: dùng addQuiz / editQuiz từ context thay vì gọi supabase trực tiếp
@@ -22,6 +27,10 @@ export const CreateQuiz: React.FC = () => {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const navigate = useNavigate();
+  
+  // INTEGRATION: AI Pipeline for persistent generation jobs
+  const [draftId] = useState(() => id || generateDraftId());
+  const [pendingGeneration, setPendingGeneration] = useState<{ jobId: string; type: 'topic' | 'content'; data: any } | null>(null);
 
   const existing = id ? getQuiz(id) : undefined;
 
@@ -38,7 +47,6 @@ export const CreateQuiz: React.FC = () => {
   const [aiTopic, setAiTopic] = useState('');
   const [aiNum, setAiNum] = useState(5);
   const [aiDifficulty, setAiDifficulty] = useState<Quiz['difficulty']>('medium');
-  const [aiGenerating, setAiGenerating] = useState(false);
   const [aiError, setAiError] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
@@ -54,6 +62,45 @@ export const CreateQuiz: React.FC = () => {
   // Image upload states per question
   const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({});
   const [imageErrors, setImageErrors] = useState<Record<string, string>>({});
+
+  // INTEGRATION: AI Pipeline hook with job completion handler
+  const handleAIJobComplete = useCallback((job: any) => {
+    if (job.metadata?.generatedQuestions) {
+      // Job completed with generated questions
+      const generated = job.metadata.generatedQuestions as Question[];
+      setQuestions(prev => [...prev.filter(q => q.text.trim()), ...generated.map(q => ({ ...q, id: uuidv4() }))]);
+      
+      // Auto-fill title/topic if empty
+      if (!title && job.metadata.prompt) setTitle(job.metadata.prompt);
+      if (!topic && job.metadata.prompt) setTopic(job.metadata.prompt);
+      
+      setShowAI(false);
+      setPendingGeneration(null);
+    }
+  }, [title, topic]);
+
+  const { isProcessing: aiGenerating, submitGeneration, submitExtraction, getJob } = useAIGeneration({
+    onJobComplete: handleAIJobComplete,
+    onJobFailed: (job) => {
+      setAiError(job.error?.message || 'AI generation failed');
+      setPendingGeneration(null);
+    },
+  });
+  
+  // INTEGRATION: Check for pending AI jobs on mount (recovery after refresh)
+  useEffect(() => {
+    const checkPendingJobs = async () => {
+      // Small delay to allow aiPipeline to hydrate from storage
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      const job = getJob(draftId);
+      if (job && (job.status === 'pending' || job.status === 'running')) {
+        console.log('[CreateQuiz] Found pending AI job, resuming:', job.id);
+        setPendingGeneration({ jobId: job.id, type: job.type as 'topic' | 'content', data: job.metadata });
+      }
+    };
+    checkPendingJobs();
+  }, [draftId, getJob]);
 
   if (!user) { navigate('/login'); return null; }
   
@@ -101,17 +148,42 @@ export const CreateQuiz: React.FC = () => {
   const removeQuestion = (idx: number) => setQuestions(prev => prev.filter((_, i) => i !== idx));
   const addQuestion = () => setQuestions(prev => [...prev, emptyQuestion()]);
 
+  // INTEGRATION: AI generation through pipeline (persistent + recoverable)
   const generateAI = async () => {
     if (!aiTopic.trim()) return;
-    setAiGenerating(true); setAiError('');
+    setAiError('');
+    
     try {
+      // Submit to AI pipeline for persistence and recovery
+      await submitGeneration(draftId, `Generate quiz: ${aiTopic} (${aiNum} questions, ${aiDifficulty}, ${lang})`);
+      
+      // Actually execute the generation (in production, this would be in a background worker)
       const generated = await generateQuizAI(aiTopic, aiNum, aiDifficulty, lang);
+      
+      // Store result in job metadata for recovery
+      const job = getJob(draftId);
+      if (job) {
+        job.metadata = { ...job.metadata, generatedQuestions: generated, prompt: aiTopic };
+        job.status = 'completed';
+        job.completedAt = Date.now();
+        job.progress = 100;
+      }
+      
+      // Apply to state
       setQuestions(prev => [...prev.filter(q => q.text.trim()), ...generated.map(q => ({ ...q, id: uuidv4() }))]);
       if (!title) setTitle(aiTopic);
       if (!topic) setTopic(aiTopic);
       setShowAI(false);
-    } catch (e: any) { setAiError(e.message); }
-    setAiGenerating(false);
+    } catch (e: any) { 
+      setAiError(e.message);
+      // Mark job as failed
+      const job = getJob(draftId);
+      if (job) {
+        job.status = 'failed';
+        job.error = { message: e.message };
+        job.completedAt = Date.now();
+      }
+    }
   };
 
   // Handle file selection
@@ -152,7 +224,7 @@ export const CreateQuiz: React.FC = () => {
     }
   };
 
-  // Auto-generate from extracted/pasted content - AI auto-detects all questions
+  // INTEGRATION: Auto-generate from content through AI pipeline
   const autoGenerateFromContent = async (content: string) => {
     setGenError('');
     if (!content.trim()) {
@@ -160,17 +232,34 @@ export const CreateQuiz: React.FC = () => {
       return;
     }
 
-    setAiGenerating(true);
     try {
-      // AI tự động phân tích và trích xuất tất cả câu hỏi từ nội dung
+      // Submit extraction job to pipeline
+      await submitExtraction(draftId, content);
+      
+      // Execute generation
       const generated = await generateQuestionsFromContent(content, lang);
+      
+      // Store result in job
+      const job = getJob(draftId);
+      if (job) {
+        job.metadata = { ...job.metadata, generatedQuestions: generated, documentContent: content };
+        job.status = 'completed';
+        job.completedAt = Date.now();
+        job.progress = 100;
+      }
+      
       setQuestions(prev => [...prev.filter(q => q.text.trim()), ...generated.map(q => ({ ...q, id: uuidv4() }))]);
       // Optional: fill quiz details from content
       if (!topic) setTopic(content.substring(0, 50) + (content.length > 50 ? '...' : ''));
     } catch (e: any) {
       setGenError(e.message);
-    } finally {
-      setAiGenerating(false);
+      // Mark job as failed
+      const job = getJob(draftId);
+      if (job) {
+        job.status = 'failed';
+        job.error = { message: e.message };
+        job.completedAt = Date.now();
+      }
     }
   };
 
