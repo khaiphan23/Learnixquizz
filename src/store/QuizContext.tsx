@@ -252,9 +252,42 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const deleteAllQuizzesByAuthor = async (authorId: string) => {
-    const { error } = await supabase.from('quizzes').delete().eq('author_id', authorId);
-    if (error) throw new Error(error.message);
-    setQuizzes([]);
+    // Use mutation system for batch delete
+    const { mutationExecutor } = await import('../mutations/core/MutationExecutor');
+    const { createMutationContext } = await import('../mutations/core/MutationID');
+    const { mutationLog } = await import('../mutations/core/MutationLog');
+    
+    const context = createMutationContext(authorId, `batch-delete-${authorId}`, 'delete_all_quizzes');
+    
+    mutationLog.record({
+      context,
+      operation: 'delete_all_quizzes',
+      entityType: 'quiz',
+      entityId: authorId,
+      payload: { authorId },
+      optimisticSnapshot: null,
+      status: 'pending',
+    });
+    
+    const result = await mutationExecutor.execute(
+      context,
+      async () => {
+        const { error } = await supabase.from('quizzes').delete().eq('author_id', authorId);
+        if (error) throw error;
+        return { deleted: true };
+      },
+      { maxRetries: 2, timeoutMs: 30000 }
+    );
+    
+    if (result.success) {
+      mutationLog.acknowledge(context.mutationId, result.data);
+      // Invalidate cache
+      queryClient.setQueryData(quizKeys.list({ userId: authorId }), []);
+      queryClient.invalidateQueries({ queryKey: quizKeys.list({ userId: authorId }) });
+    } else {
+      mutationLog.fail(context.mutationId, result.error?.message || 'Unknown error');
+      throw result.error || new Error('Lỗi xóa tất cả quiz');
+    }
   };
 
   // INTEGRATION: togglePublishQuiz uses mutation system
@@ -432,27 +465,47 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [user, attempts, queryClient]);
 
   const getQuiz = useCallback((id: string) =>
-    quizzes.find(q => q.id === id) || publicQuizzes.find(q => q.id === id),
-  [quizzes, publicQuizzes]);
+    quizzes.find(q => q.id === id) || publicQuizzesCache.find(q => q.id === id),
+  [quizzes, publicQuizzesCache]);
 
   const fetchQuizById = useCallback(async (id: string): Promise<boolean> => {
-    if (quizzes.find(q => q.id === id) || publicQuizzes.find(q => q.id === id)) return true;
+    // Check React Query cache first
+    const cached = queryClient.getQueryData<Quiz>(quizKeys.detail(id));
+    if (cached) return true;
+    
+    // Check local state
+    if (quizzes.find(q => q.id === id) || publicQuizzesCache.find(q => q.id === id)) return true;
+    
+    // Fetch and cache in React Query
     const { data, error } = await supabase.from('quizzes').select('*').eq('id', id).single();
     if (error || !data) return false;
     const quiz = dbToQuiz(data);
-    setPublicQuizzes(prev => prev.some(q => q.id === quiz.id) ? prev : [...prev, quiz]);
+    
+    // Cache in React Query
+    queryClient.setQueryData(quizKeys.detail(id), quiz);
+    
+    // Also update local cache for immediate availability
+    setPublicQuizzesCache(prev => prev.some(q => q.id === quiz.id) ? prev : [...prev, quiz]);
     return true;
-  }, [quizzes, publicQuizzes]);
+  }, [quizzes, publicQuizzesCache, queryClient]);
 
   const getQuizByShortCode = useCallback(async (code: string): Promise<Quiz | undefined> => {
-    const local = quizzes.find(q => q.shortCode === code) || publicQuizzes.find(q => q.shortCode === code);
+    // Check local state first
+    const local = quizzes.find(q => q.shortCode === code) || publicQuizzesCache.find(q => q.shortCode === code);
     if (local) return local;
+    
+    // Fetch from server
     const { data, error } = await supabase.from('quizzes').select('*').eq('short_code', code).single();
     if (error || !data) return undefined;
     const quiz = dbToQuiz(data);
-    setPublicQuizzes(prev => prev.some(q => q.id === quiz.id) ? prev : [...prev, quiz]);
+    
+    // Cache in React Query
+    queryClient.setQueryData(quizKeys.detail(quiz.id), quiz);
+    
+    // Update local cache
+    setPublicQuizzesCache(prev => prev.some(q => q.id === quiz.id) ? prev : [...prev, quiz]);
     return quiz;
-  }, [quizzes, publicQuizzes]);
+  }, [quizzes, publicQuizzesCache, queryClient]);
 
   const getAllAttemptsForQuiz = (quizId: string) => attempts.filter(a => a.quizId === quizId);
 
