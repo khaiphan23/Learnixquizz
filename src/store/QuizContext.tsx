@@ -1,9 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useCallback, ReactNode } from 'react';
 import { supabase } from '../services/supabase';
 import { Quiz, QuizAttempt } from '../types';
 import type { QuizPlayCount, UserQuizCount, CreatorQuizStats } from '../types/leaderboard';
 import { useAuth } from './AuthContext';
-// INTEGRATION: Import mutation system
+// INTEGRATION: React Query as server state source
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+// INTEGRATION: Mutation system
 import { useQuizMutations } from '../hooks/useQuizMutations';
 import { invalidationManager } from '../cache/QueryInvalidationManager';
 
@@ -74,34 +76,102 @@ interface QuizContextType {
 
 const QuizContext = createContext<QuizContextType | undefined>(undefined);
 
+// Query key factory (local to context for now)
+const quizKeys = {
+  all: ['quizzes'] as const,
+  lists: () => [...quizKeys.all, 'list'] as const,
+  list: (filters: { userId?: string; isPublic?: boolean }) => 
+    [...quizKeys.lists(), filters] as const,
+  details: () => [...quizKeys.all, 'detail'] as const,
+  detail: (id: string) => [...quizKeys.details(), id] as const,
+  attempts: (userId?: string) => ['attempts', userId] as const,
+  public: () => [...quizKeys.all, 'public'] as const,
+};
+
 export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user, isLoading: authLoading } = useAuth();
-  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
-  const [publicQuizzes, setPublicQuizzes] = useState<Quiz[]>([]);
-  const [attempts, setAttempts] = useState<QuizAttempt[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
+  
+  // React Query as source of truth - NO local state duplication
+  const { data: quizzes = [], isLoading: quizzesLoading } = useQuery({
+    queryKey: quizKeys.list({ userId: user?.id }),
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from('quizzes')
+        .select('*')
+        .eq('author_id', user.id)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return (data || []).map(dbToQuiz);
+    },
+    enabled: !!user?.id && !authLoading,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
 
-  // INTEGRATION: Setup mutation handlers
+  const { data: attempts = [] } = useQuery({
+    queryKey: quizKeys.attempts(user?.id),
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from('attempts')
+        .select('*')
+        .eq('user_id', user.id);
+      
+      if (error) throw error;
+      return (data || []).map(dbToAttempt);
+    },
+    enabled: !!user?.id && !authLoading,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  // Local state for public quizzes (fetched on-demand)
+  const [publicQuizzesCache, setPublicQuizzesCache] = React.useState<Quiz[]>([]);
+  
+  const isLoading = authLoading || quizzesLoading;
+
+  // INTEGRATION: Setup mutation handlers with React Query cache
   const handleOptimisticUpdate = useCallback((quiz: Quiz, action: 'create' | 'update' | 'delete') => {
-    if (action === 'create') {
-      setQuizzes(prev => [quiz, ...prev]);
+    if (action === 'create' && user?.id) {
+      // Optimistically add to cache
+      queryClient.setQueryData(
+        quizKeys.list({ userId: user.id }),
+        (old: Quiz[] = []) => [quiz, ...old]
+      );
     } else if (action === 'update') {
-      setQuizzes(prev => prev.map(q => q.id === quiz.id ? quiz : q));
-      setPublicQuizzes(prev => prev.map(q => q.id === quiz.id ? quiz : q));
-    } else if (action === 'delete') {
-      setQuizzes(prev => prev.filter(q => q.id !== quiz.id));
+      // Update in cache
+      queryClient.setQueryData(
+        quizKeys.list({ userId: user?.id }),
+        (old: Quiz[] = []) => old.map(q => q.id === quiz.id ? quiz : q)
+      );
+      queryClient.setQueryData(
+        quizKeys.detail(quiz.id),
+        quiz
+      );
+    } else if (action === 'delete' && user?.id) {
+      // Remove from cache
+      queryClient.setQueryData(
+        quizKeys.list({ userId: user.id }),
+        (old: Quiz[] = []) => old.filter(q => q.id !== quiz.id)
+      );
     }
-  }, []);
+  }, [queryClient, user?.id]);
 
   const handleRollback = useCallback((quizId: string, action: 'create' | 'update' | 'delete') => {
     if (action === 'create') {
-      setQuizzes(prev => prev.filter(q => q.id !== quizId));
+      // Remove optimistically added quiz
+      queryClient.setQueryData(
+        quizKeys.list({ userId: user?.id }),
+        (old: Quiz[] = []) => old.filter(q => q.id !== quizId)
+      );
     } else if (action === 'update' || action === 'delete') {
-      // For update/delete rollback, we need to refetch from server
-      // The mutation system will handle this via invalidationManager
-      console.log(`[QuizContext] Rollback for ${action} on quiz ${quizId}`);
+      // Invalidate to trigger refetch
+      queryClient.invalidateQueries({ queryKey: quizKeys.detail(quizId) });
+      queryClient.invalidateQueries({ queryKey: quizKeys.list({ userId: user?.id }) });
     }
-  }, []);
+  }, [queryClient, user?.id]);
 
   // INTEGRATION: Initialize mutation hook
   const quizMutations = useQuizMutations({
@@ -110,28 +180,6 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     onOptimisticUpdate: handleOptimisticUpdate,
     onRollback: handleRollback,
   });
-
-  useEffect(() => {
-    if (authLoading) return;
-    if (!user) { setQuizzes([]); setAttempts([]); setIsLoading(false); return; }
-
-    setIsLoading(true);
-    const fetchUserData = async () => {
-      try {
-        const [{ data: quizData }, { data: attemptData }] = await Promise.all([
-          supabase.from('quizzes').select('*').eq('author_id', user.id).order('created_at', { ascending: false }),
-          supabase.from('attempts').select('*').eq('user_id', user.id),
-        ]);
-        setQuizzes((quizData ?? []).map(dbToQuiz));
-        setAttempts((attemptData ?? []).map(dbToAttempt));
-      } catch (e) {
-        console.error('fetchUserData error:', e);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchUserData();
-  }, [user?.id, authLoading]);
 
   // INTEGRATION: addQuiz now uses mutation system
   const addQuiz = async (quiz: Quiz) => {
@@ -236,48 +284,55 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // INTEGRATION: getPublicQuizzes uses React Query pattern
   const getPublicQuizzes = useCallback(async (): Promise<Quiz[]> => {
-    // First check if we have cached public quizzes
-    if (publicQuizzes.length > 0) {
-      return publicQuizzes.filter(q => q.isPublic && !q.deletedAt);
+    // Use React Query cache first
+    const cached = queryClient.getQueryData<Quiz[]>(quizKeys.public());
+    if (cached && cached.length > 0) {
+      return cached.filter(q => q.isPublic && !q.deletedAt);
     }
     
-    // Fallback to direct fetch (will be migrated to React Query in components)
+    // Fetch and cache
     const { data, error } = await supabase
       .from('quizzes').select('*')
       .eq('is_public', true).is('deleted_at', null)
       .order('created_at', { ascending: false });
     if (error) return [];
-    const quizzes = (data ?? []).map(dbToQuiz);
-    setPublicQuizzes(quizzes);
-    return quizzes;
-  }, [publicQuizzes]);
+    const result = (data ?? []).map(dbToQuiz);
+    // Cache the result
+    queryClient.setQueryData(quizKeys.public(), result);
+    setPublicQuizzesCache(result);
+    return result;
+  }, [queryClient, publicQuizzesCache]);
 
   // INTEGRATION: importQuiz uses mutation system
   const importQuiz = async (quiz: Quiz) => {
-    // Check if already exists
-    if (publicQuizzes.some(q => q.id === quiz.id)) {
+    // Check if already exists in cache
+    const cached = queryClient.getQueryData<Quiz[]>(quizKeys.public()) || [];
+    if (cached.some(q => q.id === quiz.id)) {
       return;
     }
     
-    // Add to public quizzes locally
-    setPublicQuizzes(prev => [...prev, quiz]);
-    
-    // Create attempt record if user is taking the quiz
-    // This uses the addAttempt mutation below
+    // Add to public quizzes cache
+    queryClient.setQueryData(
+      quizKeys.public(),
+      (old: Quiz[] = []) => [...old, quiz]
+    );
+    setPublicQuizzesCache(prev => [...prev, quiz]);
   };
 
-  // INTEGRATION: addAttempt uses mutation system with proper tracking
+  // INTEGRATION: addAttempt uses React Query mutation pattern
   const addAttempt = useCallback(async (attempt: QuizAttempt) => {
     if (!user) throw new Error('Bạn cần đăng nhập để lưu kết quả');
     
-    // Optimistic update
-    setAttempts(prev => [...prev, attempt]);
+    // Optimistic update in React Query cache
+    queryClient.setQueryData(
+      quizKeys.attempts(user.id),
+      (old: QuizAttempt[] = []) => [...old, attempt]
+    );
     
     // Import mutation executor for attempts
     const { createMutationContext } = await import('../mutations/core/MutationID');
     const { mutationExecutor } = await import('../mutations/core/MutationExecutor');
     const { mutationLog } = await import('../mutations/core/MutationLog');
-    const { invalidationManager } = await import('../cache/QueryInvalidationManager');
     
     const context = createMutationContext(user.id, attempt.id, 'create_attempt');
     
@@ -305,16 +360,20 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     
     if (result.success) {
       mutationLog.acknowledge(context.mutationId, result.data);
-      invalidationManager.invalidate('create_attempt', { entityId: attempt.quizId });
+      // Invalidate to trigger background refetch
+      queryClient.invalidateQueries({ queryKey: quizKeys.attempts(user.id) });
     } else {
-      // Rollback
-      setAttempts(prev => prev.filter(a => a.id !== attempt.id));
+      // Rollback - remove from cache
+      queryClient.setQueryData(
+        quizKeys.attempts(user.id),
+        (old: QuizAttempt[] = []) => old.filter(a => a.id !== attempt.id)
+      );
       mutationLog.fail(context.mutationId, result.error?.message || 'Unknown error');
       throw result.error || new Error('Lỗi lưu kết quả');
     }
-  }, [user]);
+  }, [user, queryClient]);
 
-  // INTEGRATION: updateAttempt uses mutation system
+  // INTEGRATION: updateAttempt uses mutation system with React Query
   const updateAttempt = useCallback(async (id: string, updates: Partial<QuizAttempt>) => {
     if (!user) throw new Error('Unauthorized');
     
@@ -323,8 +382,11 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       throw new Error('Attempt không tồn tại');
     }
     
-    // Optimistic update
-    setAttempts(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+    // Optimistic update in React Query cache
+    queryClient.setQueryData(
+      quizKeys.attempts(user.id),
+      (old: QuizAttempt[] = []) => old.map(a => a.id === id ? { ...a, ...updates } : a)
+    );
     
     const dbUpdates: Record<string, any> = {};
     if (updates.score !== undefined) dbUpdates.score = updates.score;
@@ -359,12 +421,15 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (result.success) {
       mutationLog.acknowledge(context.mutationId, result.data);
     } else {
-      // Rollback
-      setAttempts(prev => prev.map(a => a.id === id ? previousAttempt : a));
+      // Rollback in cache
+      queryClient.setQueryData(
+        quizKeys.attempts(user.id),
+        (old: QuizAttempt[] = []) => old.map(a => a.id === id ? previousAttempt : a)
+      );
       mutationLog.fail(context.mutationId, result.error?.message || 'Unknown error');
       throw result.error || new Error('Lỗi cập nhật kết quả');
     }
-  }, [user, attempts]);
+  }, [user, attempts, queryClient]);
 
   const getQuiz = useCallback((id: string) =>
     quizzes.find(q => q.id === id) || publicQuizzes.find(q => q.id === id),
