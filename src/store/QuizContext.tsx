@@ -3,6 +3,9 @@ import { supabase } from '../services/supabase';
 import { Quiz, QuizAttempt } from '../types';
 import type { QuizPlayCount, UserQuizCount, CreatorQuizStats } from '../types/leaderboard';
 import { useAuth } from './AuthContext';
+// INTEGRATION: Import mutation system
+import { useQuizMutations } from '../hooks/useQuizMutations';
+import { invalidationManager } from '../cache/QueryInvalidationManager';
 
 function dbToQuiz(row: any): Quiz {
   return {
@@ -78,6 +81,36 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [attempts, setAttempts] = useState<QuizAttempt[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // INTEGRATION: Setup mutation handlers
+  const handleOptimisticUpdate = useCallback((quiz: Quiz, action: 'create' | 'update' | 'delete') => {
+    if (action === 'create') {
+      setQuizzes(prev => [quiz, ...prev]);
+    } else if (action === 'update') {
+      setQuizzes(prev => prev.map(q => q.id === quiz.id ? quiz : q));
+      setPublicQuizzes(prev => prev.map(q => q.id === quiz.id ? quiz : q));
+    } else if (action === 'delete') {
+      setQuizzes(prev => prev.filter(q => q.id !== quiz.id));
+    }
+  }, []);
+
+  const handleRollback = useCallback((quizId: string, action: 'create' | 'update' | 'delete') => {
+    if (action === 'create') {
+      setQuizzes(prev => prev.filter(q => q.id !== quizId));
+    } else if (action === 'update' || action === 'delete') {
+      // For update/delete rollback, we need to refetch from server
+      // The mutation system will handle this via invalidationManager
+      console.log(`[QuizContext] Rollback for ${action} on quiz ${quizId}`);
+    }
+  }, []);
+
+  // INTEGRATION: Initialize mutation hook
+  const quizMutations = useQuizMutations({
+    userId: user?.id || '',
+    userName: user?.name || '',
+    onOptimisticUpdate: handleOptimisticUpdate,
+    onRollback: handleRollback,
+  });
+
   useEffect(() => {
     if (authLoading) return;
     if (!user) { setQuizzes([]); setAttempts([]); setIsLoading(false); return; }
@@ -100,146 +133,74 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     fetchUserData();
   }, [user?.id, authLoading]);
 
-  // FIX LỖI 2: addQuiz giờ dùng optimistic update — thêm vào state TRƯỚC khi insert
-  // Nếu insert lỗi thì rollback. Không cần chờ DB để UI cập nhật ngay.
+  // INTEGRATION: addQuiz now uses mutation system
   const addQuiz = async (quiz: Quiz) => {
     if (!user) throw new Error('Bạn cần đăng nhập để lưu quiz');
-    
-    // Validate quiz data
-    if (!quiz.questions || quiz.questions.length === 0) {
-      throw new Error('Quiz phải có ít nhất 1 câu hỏi');
-    }
-    
-    const row = quizToDb(quiz, user.id);
-    row.author = user.name;
 
-    // Kiểm tra giới hạn câu hỏi
-    if (quiz.questions.length > 100) {
-      throw new Error(`Quiz quá nhiều câu hỏi (${quiz.questions.length}). Tối đa 100 câu. Vui lòng chia thành nhiều quiz nhỏ hơn.`);
-    }
+    console.log('[addQuiz] Using mutation system for quiz:', quiz.id);
+    const result = await quizMutations.createQuiz(quiz);
 
-    // Kiểm tra kích thước dữ liệu TRƯỚC khi optimistic update
-    const dataSize = JSON.stringify(row).length;
-    console.log('[addQuiz] Data size:', (dataSize / 1024).toFixed(2), 'KB', 'Questions:', quiz.questions.length);
-    
-    if (dataSize > 2000000) { // Tăng lên 2MB
-      throw new Error('Quiz quá lớn (>2MB) - vui lòng giảm số câu hỏi hoặc độ dài nội dung');
-    }
-
-    // Optimistic: thêm vào đầu list ngay lập tức
-    setQuizzes(prev => [quiz, ...prev]);
-
-    console.log('[addQuiz] Inserting quiz:', quiz.id, 'Questions:', quiz.questions.length);
-    const startTime = Date.now();
-    
-    try {
-      // Thực hiện insert với timeout (tăng lên 120s cho quiz lớn)
-      const timeoutMs = quiz.questions.length > 50 ? 120000 : 60000;
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
-      );
-      
-      const insertPromise = supabase.from('quizzes').insert(row);
-      
-      let result: any;
-      try {
-        result = await Promise.race([insertPromise, timeoutPromise]) as any;
-      } catch (e: any) {
-        if (e.message === 'TIMEOUT') {
-          console.error('[addQuiz] Timeout after', timeoutMs, 'ms - operation taking too long');
-          // Don't wait for insertPromise - throw error immediately to prevent hanging
-          throw new Error(`Lưu quiz quá chậm (timeout sau ${timeoutMs/1000}s). Vui lòng thử lại hoặc giảm số câu hỏi.`);
-        } else {
-          throw e;
-        }
-      }
-      
-      const duration = Date.now() - startTime;
-      console.log('[addQuiz] Insert completed in', duration, 'ms');
-      
-      if (result?.error) {
-        console.error('[addQuiz] Supabase error:', result.error);
-        throw new Error('Lỗi lưu quiz: ' + result.error.message);
-      }
-    } catch (error: any) {
-      // Rollback: xóa quiz khỏi state nếu insert thất bại
-      setQuizzes(prev => prev.filter(q => q.id !== quiz.id));
-      console.error('[addQuiz] Insert failed, rolled back:', error.message);
-      throw error;
+    if (!result.success) {
+      throw result.error || new Error('Lỗi lưu quiz');
     }
   };
 
+  // INTEGRATION: editQuiz now uses mutation system with rollback support
   const editQuiz = async (updatedQuiz: Quiz) => {
     if (!user) throw new Error('Bạn cần đăng nhập để cập nhật quiz');
-    
-    // Validate quiz data
-    if (!updatedQuiz.questions || updatedQuiz.questions.length === 0) {
-      throw new Error('Quiz phải có ít nhất 1 câu hỏi');
-    }
-    
-    const row = quizToDb(updatedQuiz, user.id);
-    
-    // Kiểm tra kích thước dữ liệu
-    const dataSize = JSON.stringify(row).length;
-    console.log('[editQuiz] Data size:', (dataSize / 1024).toFixed(2), 'KB');
-    
-    if (dataSize > 2000000) {
-      throw new Error('Quiz quá lớn (>2MB) - vui lòng giảm số câu hỏi hoặc độ dài nội dung');
-    }
-    
-    // Optimistic update
-    setQuizzes(prev => prev.map(q => q.id === updatedQuiz.id ? updatedQuiz : q));
-    setPublicQuizzes(prev => prev.map(q => q.id === updatedQuiz.id ? updatedQuiz : q));
 
-    console.log('[editQuiz] Upserting quiz:', updatedQuiz.id, 'Questions:', updatedQuiz.questions.length);
-    const startTime = Date.now();
-    
-    // Thêm timeout 120s cho quiz lớn, 60s cho quiz nhỏ
-    const timeoutMs = updatedQuiz.questions.length > 50 ? 120000 : 60000;
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
-    );
-    
-    const upsertPromise = supabase.from('quizzes').upsert(row, { onConflict: 'id' });
-    
-    let result: any;
-    try {
-      result = await Promise.race([upsertPromise, timeoutPromise]) as any;
-    } catch (e: any) {
-      if (e.message === 'TIMEOUT') {
-        console.error('[editQuiz] Timeout after', timeoutMs, 'ms - throwing error immediately');
-        throw new Error(`Lưu quiz quá chậm (timeout sau ${timeoutMs/1000}s). Vui lòng thử lại.`);
-      } else {
-        throw e;
-      }
+    // Get previous state for potential rollback
+    const previousQuiz = getQuiz(updatedQuiz.id);
+    if (!previousQuiz) {
+      throw new Error('Quiz không tồn tại');
     }
-    
-    const duration = Date.now() - startTime;
-    console.log('[editQuiz] Upsert completed in', duration, 'ms');
-    
-    if (result?.error) {
-      // Không rollback edit vì khó lấy lại state cũ — chỉ log lỗi
-      console.error('[editQuiz] Upsert error:', result.error);
-      throw new Error('Lỗi cập nhật quiz: ' + result.error.message);
+
+    console.log('[editQuiz] Using mutation system for quiz:', updatedQuiz.id);
+    const result = await quizMutations.updateQuiz(updatedQuiz, previousQuiz);
+
+    if (!result.success) {
+      throw result.error || new Error('Lỗi cập nhật quiz');
     }
   };
 
+  // INTEGRATION: deleteQuiz uses mutation system
   const deleteQuiz = async (id: string) => {
-    const { error } = await supabase.from('quizzes').update({ deleted_at: new Date().toISOString() }).eq('id', id);
-    if (error) throw new Error(error.message);
-    setQuizzes(prev => prev.map(q => q.id === id ? { ...q, deletedAt: new Date().toISOString() } : q));
+    const quiz = getQuiz(id);
+    if (!quiz) {
+      throw new Error('Quiz không tồn tại');
+    }
+
+    console.log('[deleteQuiz] Using mutation system for quiz:', id);
+    const result = await quizMutations.deleteQuiz(id, quiz);
+
+    if (!result.success) {
+      throw result.error || new Error('Lỗi xóa quiz');
+    }
   };
 
+  // INTEGRATION: restoreQuiz uses mutation system
   const restoreQuiz = async (id: string) => {
-    const { error } = await supabase.from('quizzes').update({ deleted_at: null }).eq('id', id);
-    if (error) throw new Error(error.message);
-    setQuizzes(prev => prev.map(q => q.id === id ? { ...q, deletedAt: undefined } : q));
+    const quiz = getQuiz(id);
+    if (!quiz) {
+      throw new Error('Quiz không tồn tại');
+    }
+
+    console.log('[restoreQuiz] Using mutation system for quiz:', id);
+    const result = await quizMutations.restoreQuiz(id, quiz);
+
+    if (!result.success) {
+      throw result.error || new Error('Lỗi khôi phục quiz');
+    }
   };
 
+  // INTEGRATION: permanentDeleteQuiz uses mutation system
   const permanentDeleteQuiz = async (id: string) => {
-    const { error } = await supabase.from('quizzes').delete().eq('id', id);
-    if (error) throw new Error(error.message);
-    setQuizzes(prev => prev.filter(q => q.id !== id));
+    console.log('[permanentDeleteQuiz] Using mutation system for quiz:', id);
+    const result = await quizMutations.permanentDeleteQuiz(id);
+
+    if (!result.success) {
+      throw result.error || new Error('Lỗi xóa vĩnh viễn quiz');
+    }
   };
 
   const deleteAllQuizzesByAuthor = async (authorId: string) => {
@@ -248,75 +209,162 @@ export const QuizProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setQuizzes([]);
   };
 
+  // INTEGRATION: togglePublishQuiz uses mutation system
   const togglePublishQuiz = async (id: string, isPublic: boolean) => {
-    const { error } = await supabase.from('quizzes').update({ is_public: isPublic }).eq('id', id);
-    if (error) throw new Error(error.message);
-    setQuizzes(prev => prev.map(q => q.id === id ? { ...q, isPublic } : q));
+    const quiz = getQuiz(id);
+    if (!quiz) {
+      throw new Error('Quiz không tồn tại');
+    }
+
+    console.log('[togglePublishQuiz] Using mutation system for quiz:', id);
+    const result = await quizMutations.togglePublishQuiz(id, isPublic, quiz);
+
+    if (!result.success) {
+      throw result.error || new Error('Lỗi cập nhật trạng thái quiz');
+    }
   };
 
+  // INTEGRATION: publishQuiz uses mutation system
   const publishQuiz = async (id: string) => {
-    const { error } = await supabase.from('quizzes').update({ is_public: true }).eq('id', id);
-    if (error) throw new Error(error.message);
+    const quiz = getQuiz(id);
+    if (!quiz) {
+      throw new Error('Quiz không tồn tại');
+    }
+    // Use togglePublishQuiz with isPublic=true
+    await togglePublishQuiz(id, true);
   };
 
-  const getPublicQuizzes = async (): Promise<Quiz[]> => {
+  // INTEGRATION: getPublicQuizzes uses React Query pattern
+  const getPublicQuizzes = useCallback(async (): Promise<Quiz[]> => {
+    // First check if we have cached public quizzes
+    if (publicQuizzes.length > 0) {
+      return publicQuizzes.filter(q => q.isPublic && !q.deletedAt);
+    }
+    
+    // Fallback to direct fetch (will be migrated to React Query in components)
     const { data, error } = await supabase
       .from('quizzes').select('*')
       .eq('is_public', true).is('deleted_at', null)
       .order('created_at', { ascending: false });
     if (error) return [];
-    return (data ?? []).map(dbToQuiz);
-  };
+    const quizzes = (data ?? []).map(dbToQuiz);
+    setPublicQuizzes(quizzes);
+    return quizzes;
+  }, [publicQuizzes]);
 
+  // INTEGRATION: importQuiz uses mutation system
   const importQuiz = async (quiz: Quiz) => {
-    setPublicQuizzes(prev => prev.some(q => q.id === quiz.id) ? prev : [...prev, quiz]);
+    // Check if already exists
+    if (publicQuizzes.some(q => q.id === quiz.id)) {
+      return;
+    }
+    
+    // Add to public quizzes locally
+    setPublicQuizzes(prev => [...prev, quiz]);
+    
+    // Create attempt record if user is taking the quiz
+    // This uses the addAttempt mutation below
   };
 
-  const addAttempt = async (attempt: QuizAttempt) => {
-    // Optimistic update first
+  // INTEGRATION: addAttempt uses mutation system with proper tracking
+  const addAttempt = useCallback(async (attempt: QuizAttempt) => {
+    if (!user) throw new Error('Bạn cần đăng nhập để lưu kết quả');
+    
+    // Optimistic update
     setAttempts(prev => [...prev, attempt]);
     
-    try {
-      // Add timeout to prevent hanging
-      const timeoutMs = 30000;
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
-      );
-      
-      const insertPromise = supabase.from('attempts').insert(attemptToDb(attempt));
-      
-      let result: any;
-      try {
-        result = await Promise.race([insertPromise, timeoutPromise]) as any;
-      } catch (e: any) {
-        if (e.message === 'TIMEOUT') {
-          console.log('[addAttempt] Timeout after', timeoutMs, 'ms, waiting for actual result...');
-          result = await insertPromise;
-        } else {
-          throw e;
-        }
-      }
-      
-      if (result?.error) {
-        throw new Error(result.error.message);
-      }
-    } catch (error: any) {
-      // Rollback on error
+    // Import mutation executor for attempts
+    const { createMutationContext } = await import('../mutations/core/MutationID');
+    const { mutationExecutor } = await import('../mutations/core/MutationExecutor');
+    const { mutationLog } = await import('../mutations/core/MutationLog');
+    const { invalidationManager } = await import('../cache/QueryInvalidationManager');
+    
+    const context = createMutationContext(user.id, attempt.id, 'create_attempt');
+    
+    mutationLog.record({
+      context,
+      operation: 'create_attempt',
+      entityType: 'attempt',
+      entityId: attempt.id,
+      payload: attemptToDb(attempt),
+      optimisticSnapshot: null,
+      status: 'pending',
+    });
+    
+    const result = await mutationExecutor.execute(
+      context,
+      async () => {
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('TIMEOUT')), 30000)
+        );
+        const insertPromise = supabase.from('attempts').insert(attemptToDb(attempt));
+        return await Promise.race([insertPromise, timeoutPromise]);
+      },
+      { maxRetries: 2, timeoutMs: 30000 }
+    );
+    
+    if (result.success) {
+      mutationLog.acknowledge(context.mutationId, result.data);
+      invalidationManager.invalidate('create_attempt', { entityId: attempt.quizId });
+    } else {
+      // Rollback
       setAttempts(prev => prev.filter(a => a.id !== attempt.id));
-      console.error('[addAttempt] Failed:', error.message);
-      throw error;
+      mutationLog.fail(context.mutationId, result.error?.message || 'Unknown error');
+      throw result.error || new Error('Lỗi lưu kết quả');
     }
-  };
+  }, [user]);
 
-  const updateAttempt = async (id: string, updates: Partial<QuizAttempt>) => {
+  // INTEGRATION: updateAttempt uses mutation system
+  const updateAttempt = useCallback(async (id: string, updates: Partial<QuizAttempt>) => {
+    if (!user) throw new Error('Unauthorized');
+    
+    const previousAttempt = attempts.find(a => a.id === id);
+    if (!previousAttempt) {
+      throw new Error('Attempt không tồn tại');
+    }
+    
+    // Optimistic update
+    setAttempts(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+    
     const dbUpdates: Record<string, any> = {};
     if (updates.score !== undefined) dbUpdates.score = updates.score;
     if (updates.status !== undefined) dbUpdates.status = updates.status;
     if (updates.essayGrades !== undefined) dbUpdates.essay_grades = updates.essayGrades;
-    const { error } = await supabase.from('attempts').update(dbUpdates).eq('id', id);
-    if (error) throw new Error(error.message);
-    setAttempts(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
-  };
+    
+    // Use mutation executor
+    const { createMutationContext } = await import('../mutations/core/MutationID');
+    const { mutationExecutor } = await import('../mutations/core/MutationExecutor');
+    const { mutationLog } = await import('../mutations/core/MutationLog');
+    
+    const context = createMutationContext(user.id, id, 'update_attempt');
+    
+    mutationLog.record({
+      context,
+      operation: 'update_attempt',
+      entityType: 'attempt',
+      entityId: id,
+      payload: dbUpdates,
+      optimisticSnapshot: previousAttempt,
+      status: 'pending',
+    });
+    
+    const result = await mutationExecutor.execute(
+      context,
+      async () => {
+        return await supabase.from('attempts').update(dbUpdates).eq('id', id);
+      },
+      { maxRetries: 2, timeoutMs: 30000 }
+    );
+    
+    if (result.success) {
+      mutationLog.acknowledge(context.mutationId, result.data);
+    } else {
+      // Rollback
+      setAttempts(prev => prev.map(a => a.id === id ? previousAttempt : a));
+      mutationLog.fail(context.mutationId, result.error?.message || 'Unknown error');
+      throw result.error || new Error('Lỗi cập nhật kết quả');
+    }
+  }, [user, attempts]);
 
   const getQuiz = useCallback((id: string) =>
     quizzes.find(q => q.id === id) || publicQuizzes.find(q => q.id === id),
