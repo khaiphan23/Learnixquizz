@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
 import { useQuizStore } from '../store/QuizContext';
 import { useLang } from '../store/LangContext';
+// INTEGRATION: Realtime cache synchronization
+import { useRealtimeQuizzes } from '../hooks/useRealtimeQuizzes';
 import { Button } from '../components/ui';
 import { QuizCard } from '../components/QuizCard';
 import { BookOpen, Sparkles, Users, Zap, ArrowRight, Hash, LogIn } from 'lucide-react';
@@ -12,6 +14,11 @@ export const Home: React.FC = () => {
   const { quizzes, getQuizByShortCode } = useQuizStore();
   const { t } = useLang();
   const navigate = useNavigate();
+  
+  // INTEGRATION: Realtime cache synchronization
+  // Subscribe to quiz changes for this user to keep cache fresh
+  useRealtimeQuizzes({ userId: user?.id, enabled: !!user?.id });
+  
   const [code, setCode] = useState('');
   const [codeError, setCodeError] = useState('');
   const [codeLoading, setCodeLoading] = useState(false);
