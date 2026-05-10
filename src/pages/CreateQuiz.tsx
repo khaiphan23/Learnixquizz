@@ -82,7 +82,7 @@ export const CreateQuiz: React.FC = () => {
   const { isProcessing: aiGenerating, submitGeneration, submitExtraction, getJob } = useAIGeneration({
     onJobComplete: handleAIJobComplete,
     onJobFailed: (job) => {
-      setAiError(job.error?.message || 'AI generation failed');
+      setAiError(job.error || 'AI generation failed');
       setPendingGeneration(null);
     },
   });
@@ -180,7 +180,7 @@ export const CreateQuiz: React.FC = () => {
       const job = getJob(draftId);
       if (job) {
         job.status = 'failed';
-        job.error = { message: e.message };
+        job.error = e.message;
         job.completedAt = Date.now();
       }
     }
@@ -257,7 +257,7 @@ export const CreateQuiz: React.FC = () => {
       const job = getJob(draftId);
       if (job) {
         job.status = 'failed';
-        job.error = { message: e.message };
+        job.error = e.message;
         job.completedAt = Date.now();
       }
     }

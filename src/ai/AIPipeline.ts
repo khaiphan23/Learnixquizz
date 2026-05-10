@@ -35,6 +35,10 @@ export interface AIJob {
     promptTokens?: number;
     completionTokens?: number;
     model?: string;
+    // INTEGRATION: CreateQuiz.tsx metadata fields for job recovery
+    generatedQuestions?: import('../types').Question[];
+    prompt?: string;
+    documentContent?: string;
   };
 }
 
