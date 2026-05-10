@@ -17,6 +17,22 @@ export type AIJobStatus =
   | 'failed' 
   | 'cancelled';
 
+// Extensible metadata for different AI job types
+export interface AIJobMetadata {
+  promptTokens?: number;
+  completionTokens?: number;
+  model?: string;
+  // INTEGRATION: CreateQuiz.tsx metadata fields for job recovery
+  generatedQuestions?: import('../types').Question[];
+  prompt?: string;
+  documentContent?: string;
+  // Translation metadata
+  sourceLanguage?: string;
+  translatedFields?: string[];
+  // Allow future extensions without type errors
+  [key: string]: unknown;
+}
+
 export interface AIJob {
   id: string;
   type: AIJobType;
@@ -24,22 +40,14 @@ export interface AIJob {
   targetLanguage?: string;
   status: AIJobStatus;
   progress: number;
-  result?: any;
+  result?: unknown;
   error?: string;
   createdAt: number;
   startedAt?: number;
   completedAt?: number;
   edgeFunctionId?: string;
   retryCount: number;
-  metadata?: {
-    promptTokens?: number;
-    completionTokens?: number;
-    model?: string;
-    // INTEGRATION: CreateQuiz.tsx metadata fields for job recovery
-    generatedQuestions?: import('../types').Question[];
-    prompt?: string;
-    documentContent?: string;
-  };
+  metadata?: AIJobMetadata;
 }
 
 const STORAGE_KEY = 'learnix-ai-jobs-v1';
@@ -421,43 +429,56 @@ class AIPipeline {
   }
 }
 
+// Public API interface for type-safe external access
+export interface AIPipelinePublic {
+  submit: (jobSpec: Omit<AIJob, 'id' | 'status' | 'progress' | 'retryCount' | 'createdAt'>) => Promise<AIJob>;
+  cancel: (jobId: string) => Promise<boolean>;
+  getJobs: () => AIJob[];
+  getJob: (id: string) => AIJob | undefined;
+  subscribe: (listener: (jobs: AIJob[]) => void) => () => void;
+  destroy: () => void;
+  initialize: () => void;
+}
+
 // Lazy singleton
 let aiPipelineInstance: AIPipeline | null = null;
 
-function getAIPipeline(): AIPipeline {
+function getAIPipeline(): AIPipelinePublic {
   if (!aiPipelineInstance && typeof window !== 'undefined') {
     aiPipelineInstance = new AIPipeline();
     aiPipelineInstance.initialize();
   }
   if (!aiPipelineInstance) {
-    // Dummy for SSR
-    return {
-      submit: async (spec: any) => ({ ...spec, id: 'ssr', status: 'pending', progress: 0, retryCount: 0, createdAt: Date.now() } as AIJob),
+    // SSR-safe dummy with proper typing
+    const dummy: AIPipelinePublic = {
+      submit: async (spec) => ({ 
+        ...spec, 
+        id: 'ssr', 
+        status: 'pending', 
+        progress: 0, 
+        retryCount: 0, 
+        createdAt: Date.now() 
+      } as AIJob),
       cancel: async () => false,
       getJobs: () => [],
       getJob: () => undefined,
       subscribe: () => () => {},
       destroy: () => {},
       initialize: () => {},
-    } as AIPipeline;
+    };
+    return dummy;
   }
   return aiPipelineInstance;
 }
 
-export const aiPipeline = new Proxy({} as AIPipeline, {
+export const aiPipeline: AIPipelinePublic = new Proxy({} as AIPipelinePublic, {
   get(target, prop) {
-    return (getAIPipeline() as any)[prop];
+    const pipeline = getAIPipeline();
+    const key = prop as keyof AIPipelinePublic;
+    return pipeline[key];
   },
 });
 
-export function useAIPipeline() {
-  const pipeline = getAIPipeline();
-  return {
-    submit: (spec: Omit<AIJob, 'id' | 'status' | 'progress' | 'retryCount' | 'createdAt'>) =>
-      pipeline.submit(spec),
-    cancel: (id: string) => pipeline.cancel(id),
-    getJobs: () => pipeline.getJobs(),
-    getJob: (id: string) => pipeline.getJob(id),
-    subscribe: (cb: (jobs: AIJob[]) => void) => pipeline.subscribe(cb),
-  };
+export function useAIPipeline(): AIPipelinePublic {
+  return getAIPipeline();
 }
