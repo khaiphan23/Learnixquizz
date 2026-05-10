@@ -155,14 +155,15 @@ class AIPipeline {
 
   private applyOptimistic(job: AIJob): void {
     // Apply optimistic translation placeholder
-    if (job.type === 'translate') {
-      const queryKey = ['quiz', job.entityId, job.targetLanguage];
+    if (job.type === 'translate' && job.targetLanguage) {
+      // Type guard ensures targetLanguage is string, not undefined
+      const queryKey: string[] = ['quiz', job.entityId, job.targetLanguage];
       
-      cacheSynchronizer.patch(queryKey, (old: any) => {
+      cacheSynchronizer.patch(queryKey, (old: unknown) => {
         if (!old) return old;
         
         return {
-          ...old,
+          ...old as Record<string, unknown>,
           _optimisticTranslation: {
             status: 'translating',
             progress: 0,
@@ -309,9 +310,11 @@ class AIPipeline {
     this.notifyListeners();
 
     // Update cache
-    if (job.status === 'completed') {
+    if (job.status === 'completed' && job.targetLanguage) {
+      // Type guard ensures targetLanguage is string before building query key
+      const queryKey: string[] = ['quiz', job.entityId, job.targetLanguage];
       cacheSynchronizer.queueRefetch(
-        ['quiz', job.entityId, job.targetLanguage],
+        queryKey,
         { immediate: true }
       );
     }
